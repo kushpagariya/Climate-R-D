@@ -185,53 +185,6 @@ export interface BalloonPosition {
   phase: 'ascending' | 'descending' | 'complete';
 }
 
-export function generateLiveMissionData(
-  station: RadiosondeStation,
-  elapsedMinutes: number
-): {
-  position: BalloonPosition;
-  trajectory: BalloonPosition[];
-  observations: RadiosondeObservation[];
-} {
-  const ascentRate = 5;
-  const currentAltitude = Math.min(30000, elapsedMinutes * 60 * ascentRate);
-  const phase: 'ascending' | 'descending' | 'complete' =
-    currentAltitude >= 30000 ? 'descending' :
-    elapsedMinutes > 120 ? 'complete' : 'ascending';
-
-  const drift = elapsedMinutes * 0.005;
-  const driftDirection = 45;
-  const latDrift = drift * Math.cos(driftDirection * Math.PI / 180);
-  const lonDrift = drift * Math.sin(driftDirection * Math.PI / 180);
-
-  const position: BalloonPosition = {
-    lat: station.latitude + latDrift,
-    lon: station.longitude + lonDrift,
-    altitude: currentAltitude,
-    timestamp: new Date(Date.now() - (120 - elapsedMinutes) * 60000),
-    phase,
-  };
-
-  const trajectory: BalloonPosition[] = [];
-  for (let i = 0; i <= elapsedMinutes; i += 2) {
-    const alt = Math.min(30000, i * 60 * ascentRate);
-    const d = i * 0.005;
-    trajectory.push({
-      lat: station.latitude + d * Math.cos(driftDirection * Math.PI / 180),
-      lon: station.longitude + d * Math.sin(driftDirection * Math.PI / 180),
-      altitude: alt,
-      timestamp: new Date(Date.now() - (elapsedMinutes - i) * 60000),
-      phase: alt >= 30000 ? 'descending' : 'ascending',
-    });
-  }
-
-  return {
-    position,
-    trajectory,
-    observations: generateRadiosondeProfile(),
-  };
-}
-
 export interface AtmosphericEvent {
   type: string;
   severity: 'low' | 'medium' | 'high';
@@ -240,52 +193,258 @@ export interface AtmosphericEvent {
   description: string;
 }
 
-export function detectAtmosphericEvents(data: RadiosondeObservation[]): AtmosphericEvent[] {
+export function detectAtmosphericEvents(
+  data: RadiosondeObservation[]
+): AtmosphericEvent[] {
+
   const events: AtmosphericEvent[] = [];
 
   for (let i = 1; i < data.length - 1; i++) {
-    if (data[i].temperature > data[i - 1].temperature && data[i].height < 5000) {
+
+    if (
+      data[i].temperature >
+      data[i - 1].temperature &&
+      data[i].height < 5000
+    ) {
       events.push({
         type: 'Temperature Inversion',
         severity: 'medium',
         heightRange: [data[i - 1].height, data[i].height],
         pressureRange: [data[i].pressure, data[i - 1].pressure],
-        description: `Temperature increases by ${(data[i].temperature - data[i - 1].temperature).toFixed(1)}°C with height`,
+        description: `Temperature inversion near ${(data[i].height / 1000).toFixed(1)} km`,
       });
     }
-  }
 
-  for (let i = 1; i < data.length; i++) {
-    const windShear = Math.abs(data[i].windSpeed - data[i - 1].windSpeed);
-    const heightDiff = (data[i].height - data[i - 1].height) / 1000;
-    if (windShear / heightDiff > 20) {
-      events.push({
-        type: 'Strong Wind Shear',
-        severity: 'high',
-        heightRange: [data[i - 1].height, data[i].height],
-        pressureRange: [data[i].pressure, data[i - 1].pressure],
-        description: `Wind speed changes by ${windShear.toFixed(1)} m/s over ${(heightDiff * 1000).toFixed(0)} m`,
-      });
-    }
-  }
-
-  for (let i = 0; i < data.length; i++) {
-    if (data[i].relativeHumidity > 90 && data[i].height > 500) {
+    if (
+      data[i].relativeHumidity > 90 &&
+      data[i].height > 500
+    ) {
       events.push({
         type: 'High Moisture Layer',
-        severity: 'medium',
+        severity: 'low',
         heightRange: [data[i].height, data[i].height + 500],
         pressureRange: [data[i].pressure, data[i].pressure - 10],
-        description: `Relative humidity of ${data[i].relativeHumidity.toFixed(1)}% detected`,
+        description: `RH ${data[i].relativeHumidity.toFixed(1)}%`,
       });
     }
   }
 
-  return events
-    .filter((event, index, self) =>
-      index === self.findIndex(
-        e => e.type === event.type && Math.abs(e.heightRange[0] - event.heightRange[0]) < 1000
-      )
-    )
-    .slice(0, 8);
+  return events.slice(0, 8);
+}
+
+export function generateLiveMissionData(
+  station: RadiosondeStation,
+  elapsedMinutes: number
+): {
+  position: BalloonPosition;
+  trajectory: BalloonPosition[];
+  observations: RadiosondeObservation[];
+} {
+
+  const burstAltitude = 30000; // 30 km
+  const ascentRate = 5; // m/s
+  const descentRate = 12; // m/s
+
+  const burstMinute =
+    burstAltitude / (ascentRate * 60);
+
+  let currentAltitude = 0;
+  let phase:
+    | 'ascending'
+    | 'descending'
+    | 'complete' = 'ascending';
+
+  // -------------------------
+  // Altitude calculation
+  // -------------------------
+
+  if (elapsedMinutes <= burstMinute) {
+
+    currentAltitude =
+      elapsedMinutes *
+      60 *
+      ascentRate;
+
+    phase = 'ascending';
+
+  } else {
+
+    currentAltitude =
+      burstAltitude -
+      (
+        elapsedMinutes -
+        burstMinute
+      ) *
+      60 *
+      descentRate;
+
+    if (currentAltitude > 0) {
+
+      phase = 'descending';
+
+    } else {
+
+      currentAltitude = 0;
+      phase = 'complete';
+    }
+  }
+
+  // -------------------------
+  // Drift model
+  // -------------------------
+
+  const driftDirection = 45;
+
+  let drift = 0;
+
+  if (elapsedMinutes <= burstMinute) {
+
+    drift = elapsedMinutes * 0.005;
+
+  } else {
+
+    const ascentDrift =
+      burstMinute * 0.005;
+
+    const descentMinutes =
+      elapsedMinutes - burstMinute;
+
+    drift =
+      ascentDrift +
+      descentMinutes * 0.003;
+  }
+
+  const latDrift =
+    drift *
+    Math.cos(
+      driftDirection * Math.PI / 180
+    );
+
+  const lonDrift =
+    drift *
+    Math.sin(
+      driftDirection * Math.PI / 180
+    );
+
+  // -------------------------
+  // Current position
+  // -------------------------
+
+  const position: BalloonPosition = {
+    lat: station.latitude + latDrift,
+    lon: station.longitude + lonDrift,
+    altitude: currentAltitude,
+    timestamp: new Date(
+      Date.now() -
+      (120 - elapsedMinutes) * 60000
+    ),
+    phase,
+  };
+
+  // -------------------------
+  // Trajectory
+  // -------------------------
+
+  const trajectory: BalloonPosition[] = [];
+
+  for (
+    let i = 0;
+    i <= elapsedMinutes;
+    i += 2
+  ) {
+
+    let alt = 0;
+
+    let pointPhase:
+      | 'ascending'
+      | 'descending'
+      | 'complete' =
+      'ascending';
+
+    if (i <= burstMinute) {
+
+      alt =
+        i *
+        60 *
+        ascentRate;
+
+      pointPhase = 'ascending';
+
+    } else {
+
+      alt =
+        burstAltitude -
+        (
+          i -
+          burstMinute
+        ) *
+        60 *
+        descentRate;
+
+      if (alt > 0) {
+
+        pointPhase = 'descending';
+
+      } else {
+
+        alt = 0;
+        pointPhase = 'complete';
+      }
+    }
+
+    let pointDrift = 0;
+
+    if (i <= burstMinute) {
+
+      pointDrift = i * 0.005;
+
+    } else {
+
+      const ascentDrift =
+        burstMinute * 0.005;
+
+      const descentMinutes =
+        i - burstMinute;
+
+      pointDrift =
+        ascentDrift +
+        descentMinutes * 0.003;
+    }
+
+    trajectory.push({
+      lat:
+        station.latitude +
+        pointDrift *
+          Math.cos(
+            driftDirection *
+              Math.PI /
+              180
+          ),
+
+      lon:
+        station.longitude +
+        pointDrift *
+          Math.sin(
+            driftDirection *
+              Math.PI /
+              180
+          ),
+
+      altitude: alt,
+
+      timestamp: new Date(
+        Date.now() -
+        (elapsedMinutes - i) * 60000
+      ),
+
+      phase: pointPhase,
+    });
+  }
+
+  return {
+    position,
+    trajectory,
+    observations:
+      generateRadiosondeProfile(),
+  };
 }
