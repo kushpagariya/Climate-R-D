@@ -115,7 +115,51 @@ export function BalloonMap({ station, position, trajectory }: Props) {
         }
       }
     });
+    const burstPoint = trajectory.find(
+      p => p.phase === 'descending'
+    );
 
+    if (burstPoint) {
+      const burstX = lonToX(burstPoint.lon);
+      const burstY = latToY(burstPoint.lat);
+
+      ctx.fillStyle = '#ef4444';
+
+      ctx.beginPath();
+      ctx.arc(burstX, burstY, 7, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText('BURST', burstX + 10, burstY);
+    }
+    const landingPoint = trajectory.find(
+      p => p.phase === 'complete'
+    );
+
+    if (landingPoint) {
+      const landingX = lonToX(landingPoint.lon);
+      const landingY = latToY(landingPoint.lat);
+
+      ctx.fillStyle = '#22c55e';
+
+      ctx.beginPath();
+      ctx.rect(
+        landingX - 5,
+        landingY - 5,
+        10,
+        10
+      );
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText(
+        'LANDING',
+        landingX + 10,
+        landingY
+      );
+    }
     // Draw station
     ctx.fillStyle = '#06b6d4';
     ctx.strokeStyle = '#0ea5e9';
@@ -144,7 +188,12 @@ export function BalloonMap({ station, position, trajectory }: Props) {
     ctx.fill();
 
     // Balloon icon (simplified)
-    ctx.fillStyle = position.phase === 'ascending' ? '#10b981' : '#f59e0b';
+    ctx.fillStyle =
+      position.phase === 'ascending'
+        ? '#10b981'
+        : position.phase === 'descending'
+        ? '#f59e0b'
+        : '#06b6d4';
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2;
     
@@ -201,18 +250,32 @@ export function BalloonMap({ station, position, trajectory }: Props) {
       {/* Map controls overlay */}
       <div className="absolute top-4 right-4 space-y-2">
         <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-lg p-2 text-xs space-y-1">
+
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-green-500"></div>
             <span>Ascending</span>
           </div>
+
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-orange-500"></div>
             <span>Descending</span>
           </div>
+
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-cyan-500"></div>
             <span>Launch Site</span>
           </div>
+
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-red-500"></div>
+            <span>Burst</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-green-500"></div>
+            <span>Landing</span>
+          </div>
+
         </div>
       </div>
       
@@ -220,7 +283,15 @@ export function BalloonMap({ station, position, trajectory }: Props) {
       <div className="absolute bottom-4 left-4 bg-card/80 backdrop-blur-sm border border-border/50 rounded-lg px-3 py-2">
         <div className="text-xs text-muted-foreground">Mission Status</div>
         <div className="text-sm">
-          <span className={position.phase === 'ascending' ? 'text-green-400' : 'text-orange-400'}>
+          <span
+            className={
+              position.phase === 'ascending'
+                ? 'text-green-400'
+                : position.phase === 'descending'
+                ? 'text-orange-400'
+                : 'text-cyan-400'
+            }
+          >
             {position.phase.toUpperCase()}
           </span>
           {' • '}

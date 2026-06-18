@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useState, useEffect } from "react";
 import { GlassCard } from "../components/glass-card";
 import { Badge } from "../components/ui/badge";
@@ -26,6 +27,7 @@ import { BalloonMap } from "../components/balloon-map";
 export function MissionControl() {
   const [elapsedMinutes, setElapsedMinutes] = useState(45);
   const [isLive, setIsLive] = useState(true);
+  const mapCardRef = useRef<HTMLDivElement>(null);
   const station = STATIONS[0];
 
   const missionData = generateLiveMissionData(station, elapsedMinutes);
@@ -33,46 +35,133 @@ export function MissionControl() {
   const events = detectAtmosphericEvents(observations);
   
   // Current observation based on altitude
-  const currentObs = observations.find(obs => 
-    Math.abs(obs.height - position.altitude) < 500
-  ) || observations[0];
+  const currentObs = observations.reduce(
+  (closest, obs) =>
+    Math.abs(obs.height - position.altitude) <
+    Math.abs(closest.height - position.altitude)
+      ? obs
+      : closest,
+  observations[0]
+);
 
   // Calculate metrics
   const missionDuration = `${Math.floor(elapsedMinutes / 60)}h ${elapsedMinutes % 60}m`;
+
   const distanceTravelled = Math.sqrt(
     Math.pow((position.lat - station.latitude) * 111, 2) +
     Math.pow((position.lon - station.longitude) * 111, 2)
   ).toFixed(1);
-  
-  const verticalRate = position.phase === 'ascending' ? 5.0 : -10.0;
-  const horizontalSpeed = 15.5;
-  const currentHeading = 45;
-  const maxAltitude = observations[observations.length - 1].height;
-  // Simulate live updates
-  useEffect(() => {
-    if (!isLive) return;
-    
-    const interval = setInterval(() => {
-      setElapsedMinutes(prev => {
-        if (prev >= 120) {
-          setIsLive(false);
-          return 120;
-        }
-        return prev + 1;
-      });
-    }, 2000); // Update every 2 seconds
 
-    return () => clearInterval(interval);
-  }, [isLive]);
+  // Previous position
+  const prevPosition =
+    trajectory.length > 1
+      ? trajectory[trajectory.length - 2]
+      : trajectory[0];
 
-  const getSeverityColor = (severity: string) => {
+  // Vertical Rate (m/s)
+  const verticalRate =
+    trajectory.length > 1
+      ? (
+          position.altitude -
+          prevPosition.altitude
+        ) /
+        (
+          (position.timestamp.getTime() -
+            prevPosition.timestamp.getTime()) /
+          1000
+        )
+      : 0;
+
+  // Horizontal Speed (m/s)
+  const distanceKmBetweenPoints =
+    Math.sqrt(
+      Math.pow(
+        (position.lat - prevPosition.lat) * 111,
+        2
+      ) +
+      Math.pow(
+        (position.lon - prevPosition.lon) * 111,
+        2
+      )
+    );
+
+  const deltaTimeSec =
+    trajectory.length > 1
+      ? (
+          position.timestamp.getTime() -
+          prevPosition.timestamp.getTime()
+        ) / 1000
+      : 1;
+
+  const horizontalSpeed =
+    deltaTimeSec > 0
+      ? (distanceKmBetweenPoints * 1000) /
+        deltaTimeSec
+      : 0;
+
+  // Heading (degrees)
+  const dLon =
+    position.lon - prevPosition.lon;
+
+  const dLat =
+    position.lat - prevPosition.lat;
+
+  const currentHeading =
+    trajectory.length > 1
+      ? (
+          Math.atan2(dLon, dLat) *
+            180 /
+            Math.PI +
+          360
+        ) %
+        360
+      : 0;
+
+  // Max altitude reached
+  const maxAltitude = Math.max(
+    ...observations.map(
+      (o) => o.height
+    )
+  );
+  const headingText =
+    currentHeading >= 337.5 || currentHeading < 22.5
+      ? "N"
+      : currentHeading < 67.5
+      ? "NE"
+      : currentHeading < 112.5
+      ? "E"
+      : currentHeading < 157.5
+      ? "SE"
+      : currentHeading < 202.5
+      ? "S"
+      : currentHeading < 247.5
+      ? "SW"
+      : currentHeading < 292.5
+      ? "W"
+      : "NW";
+
+    const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case 'high': return 'text-red-400 bg-red-400/10 border-red-400/20';
-      case 'medium': return 'text-orange-400 bg-orange-400/10 border-orange-400/20';
-      default: return 'text-blue-400 bg-blue-400/10 border-blue-400/20';
+      case 'high':
+        return 'text-red-400 bg-red-400/10 border-red-400/20';
+
+      case 'medium':
+        return 'text-orange-400 bg-orange-400/10 border-orange-400/20';
+
+      default:
+        return 'text-blue-400 bg-blue-400/10 border-blue-400/20';
     }
   };
-
+  
+  const burstPoint =
+    trajectory.reduce(
+      (max, p) =>
+        p.altitude > max.altitude
+          ? p
+          : max,
+      trajectory[0]
+    );
+    
   return (
     <div className="max-w-[1800px] mx-auto p-6 space-y-6">
       {/* Live Status Banner */}
@@ -107,24 +196,37 @@ export function MissionControl() {
         {/* Left Column: Map and Telemetry */}
         <div className="lg:col-span-2 space-y-6">
           {/* Flight Map */}
-          <GlassCard>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg">Live Flight Tracking</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Real-time balloon position and trajectory
-                  </p>
+          <div ref={mapCardRef}>
+            <GlassCard>
+              <div className="space-y-4">
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg">Live Flight Tracking</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Real-time balloon position and trajectory
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      mapCardRef.current?.requestFullscreen();
+                    }}
+                    className="p-2 rounded-lg hover:bg-white/10 transition"
+                  >
+                    <Maximize2 className="w-5 h-5 text-muted-foreground hover:text-foreground" />
+                  </button>
                 </div>
-                <Maximize2 className="w-5 h-5 text-muted-foreground cursor-pointer hover:text-foreground" />
+
+                <BalloonMap
+                  station={station}
+                  position={position}
+                  trajectory={trajectory}
+                />
+
               </div>
-              <BalloonMap 
-                station={station} 
-                position={position} 
-                trajectory={trajectory} 
-              />
-            </div>
-          </GlassCard>
+            </GlassCard>
+          </div>
 
           {/* Live Telemetry */}
           <GlassCard>
@@ -255,7 +357,9 @@ export function MissionControl() {
                   <Navigation className="w-4 h-4" />
                   <span className="text-sm">Heading</span>
                 </div>
-                <span className="text-foreground">{currentHeading}° (NE)</span>
+                <span className="text-foreground">
+                  {currentHeading.toFixed(0)}° ({headingText})
+                </span>
               </div>
 
               <div className="flex items-center justify-between py-2 border-b border-border/30">
@@ -289,7 +393,11 @@ export function MissionControl() {
                   <div className="flex justify-between">
                     <span>Freezing Level:</span>
                     <span className="text-cyan-400">
-                      {(observations.find(o => o.temperature <= 0)?.height || 0 / 1000).toFixed(1)} km
+                      {(
+                        (observations.find(
+                          o => o.temperature <= 0
+                        )?.height ?? 0) / 1000
+                      ).toFixed(1)} km
                     </span>
                   </div>
                   <div className="flex justify-between">
