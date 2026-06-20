@@ -8,6 +8,7 @@ import {
 } from "react";
 import { loginApi, signupApi } from "../api/auth";
 import { getProfileApi, updateProfileApi } from "../api/profile";
+import { logActivityApi } from "../api/activity";
 import { ApiError } from "../api/client";
 import {
   clearStoredSession,
@@ -142,6 +143,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const user = mergeUserWithProfile(response.user, response.profile);
         const nextSession = buildSession(user, response.token, rememberMe);
         persistSession(nextSession);
+        void logActivityApi(response.token, {
+          action: "login",
+          resourceType: "user",
+          resourceId: response.user.id,
+        });
         return user;
       } catch (err) {
         const message =
@@ -170,6 +176,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           onboardingComplete: false,
         });
         persistSession(buildSession(user, response.token, true));
+        void logActivityApi(response.token, {
+          action: "signup",
+          resourceType: "user",
+          resourceId: response.user.id,
+        });
       } catch (err) {
         const message =
           err instanceof ApiError
@@ -185,10 +196,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    if (session?.token) {
+      void logActivityApi(session.token, {
+        action: "logout",
+        resourceType: "user",
+        resourceId: session.user.id,
+      });
+    }
     setSession(null);
     setError(null);
     clearStoredSession();
-  }, []);
+  }, [session]);
 
   const setRole = useCallback(
     async (role: UserRole) => {

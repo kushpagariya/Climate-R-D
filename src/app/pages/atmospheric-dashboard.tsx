@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { GlassCard } from "../components/glass-card";
 import { Button } from "../components/ui/button";
 import {
@@ -42,6 +42,11 @@ import { TempHumidityScatterChart } from "../components/charts/temp-humidity-sca
 import { CorrelationHeatmap } from "../components/charts/correlation-heatmap";
 import { ChartZoomWrapper } from "../components/chart-zoom-wrapper";
 import { ComparePanel } from "../components/compare-panel";
+import { useAuth } from "../auth/use-auth";
+import { createGraphHistoryApi, getGraphHistoryApi } from "../api/history";
+import { createSavedAnalysisApi, getSavedAnalysesApi } from "../api/analysis";
+import { createFavoriteApi, getFavoritesApi } from "../api/favorites";
+import { logActivityApi } from "../api/activity";
 
 type TimeSlot = "00:00" | "12:00";
 
@@ -164,6 +169,7 @@ function BalloonHistoryItem({
 
 export function AtmosphericDashboard() {
   const today = new Date().toISOString().split("T")[0];
+  const { session } = useAuth();
 
   const [selectedStation, setSelectedStation] = useState(STATIONS[0].id);
   const [selectedDate, setSelectedDate] = useState(today);
@@ -176,6 +182,8 @@ export function AtmosphericDashboard() {
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
 
   const [refreshKey, setRefreshKey] = useState(0);
+  const lastStationRef = useRef(selectedStation);
+  const lastDateRef = useRef(selectedDate);
 
   const data = useMemo<RadiosondeObservation[]>(
     () => generateRadiosondeProfile(selectedDate, selectedTime, selectedStation),
@@ -208,6 +216,116 @@ export function AtmosphericDashboard() {
 
   const station = STATIONS.find((s) => s.id === selectedStation) || STATIONS[0];
 
+  useEffect(() => {
+    if (!session?.token) return;
+    void getGraphHistoryApi(session.token, 50);
+    void getSavedAnalysesApi(session.token, 50);
+    void getFavoritesApi(session.token, 50);
+  }, [session?.token]);
+
+  useEffect(() => {
+    if (!session?.token) return;
+    void createGraphHistoryApi(session.token, {
+      stationId: selectedStation,
+      date: selectedDate,
+      time: selectedTime,
+      chartType: "sounding-view",
+    });
+    void logActivityApi(session.token, {
+      action: "view_sounding",
+      resourceType: "sounding",
+      resourceId: `${selectedStation}:${selectedDate}:${selectedTime}`,
+      metadata: {
+        stationId: selectedStation,
+        date: selectedDate,
+        time: selectedTime,
+      },
+    });
+  }, [selectedDate, selectedStation, selectedTime, session?.token]);
+
+  useEffect(() => {
+    if (!session?.token) return;
+    if (lastStationRef.current !== selectedStation) {
+      void logActivityApi(session.token, {
+        action: "change_station",
+        resourceType: "station",
+        resourceId: selectedStation,
+      });
+      lastStationRef.current = selectedStation;
+    }
+  }, [selectedStation, session?.token]);
+
+  useEffect(() => {
+    if (!session?.token) return;
+    if (lastDateRef.current !== selectedDate) {
+      void logActivityApi(session.token, {
+        action: "change_date",
+        resourceType: "sounding_date",
+        resourceId: selectedDate,
+      });
+      lastDateRef.current = selectedDate;
+    }
+  }, [selectedDate, session?.token]);
+
+  useEffect(() => {
+    if (!session?.token || !compareOpen) return;
+    void createGraphHistoryApi(session.token, {
+      stationId: selectedStation,
+      date: selectedDate,
+      time: selectedTime,
+      chartType: "compare-view",
+    });
+    void logActivityApi(session.token, {
+      action: "open_compare",
+      resourceType: "compare",
+      metadata: { stationId: selectedStation, date: selectedDate, time: selectedTime },
+    });
+  }, [compareOpen, selectedDate, selectedStation, selectedTime, session?.token]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!session?.token) return;
+      if (!event.ctrlKey || !event.shiftKey) return;
+
+      if (event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void createSavedAnalysisApi(session.token, {
+          stationId: selectedStation,
+          date: selectedDate,
+          time: selectedTime,
+          comparisonSettings: {
+            compareOpen,
+            activeHistoryId,
+          },
+          notes: "Saved via keyboard shortcut Ctrl+Shift+S",
+        });
+      }
+
+      if (event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        const isSounding = Boolean(activeHistoryId);
+        void createFavoriteApi(session.token, {
+          type: isSounding ? "sounding" : "station",
+          refId: isSounding ? activeHistoryId! : selectedStation,
+          label: isSounding
+            ? `Sounding ${selectedDate} ${selectedTime}`
+            : station.name,
+        });
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    activeHistoryId,
+    compareOpen,
+    selectedDate,
+    selectedStation,
+    selectedTime,
+    session?.token,
+    station.name,
+  ]);
+
   const handleExport = () => {
     const rows = [
       [
@@ -238,6 +356,19 @@ export function AtmosphericDashboard() {
     a.download = `radiosonde_${selectedStation}_${selectedDate}_${selectedTime}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+
+    if (session?.token) {
+      void createSavedAnalysisApi(session.token, {
+        stationId: selectedStation,
+        date: selectedDate,
+        time: selectedTime,
+        comparisonSettings: {
+          compareOpen,
+          activeHistoryId,
+        },
+        notes: "Auto-saved on CSV export",
+      });
+    }
   };
 
   const tempDelta = prevParams

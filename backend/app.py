@@ -1,22 +1,23 @@
 import os
-from datetime import datetime, timezone
-from functools import wraps
 
 import bcrypt
-import jwt
 from bson import ObjectId
 from dotenv import load_dotenv
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from pymongo import MongoClient
+from pymongo.errors import DuplicateKeyError
+
+from auth_utils import create_token, require_auth, utc_now, log_activity
+from routes.activity import activity_bp
+from routes.analysis import analysis_bp
+from routes.favorites import favorites_bp
+from routes.history import history_bp
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
-
-JWT_SECRET = os.getenv("JWT_SECRET", "indravani-dev-secret-change-in-production")
-JWT_ALGORITHM = "HS256"
 
 client = MongoClient(os.getenv("MONGO_URI"))
 
@@ -30,13 +31,17 @@ except Exception as e:
 db = client["indravani_weather_db"]
 users = db["users"]
 user_profiles = db["user_profiles"]
+graph_history = db["graph_history"]
+saved_analyses = db["saved_analyses"]
+favorites = db["favorites"]
+activity_logs = db["activity_logs"]
 
 users.create_index("email", unique=True)
 user_profiles.create_index("userId", unique=True)
-
-
-def utc_now():
-    return datetime.now(timezone.utc)
+graph_history.create_index([("userId", 1), ("createdAt", -1)])
+saved_analyses.create_index([("userId", 1), ("createdAt", -1)])
+favorites.create_index([("userId", 1), ("createdAt", -1)])
+activity_logs.create_index([("userId", 1), ("createdAt", -1)])
 
 
 def serialize_user(doc):
@@ -62,40 +67,13 @@ def serialize_profile(doc):
     }
 
 
-def create_token(user_id):
-    return jwt.encode({"sub": str(user_id)}, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
-
 def get_profile_for_user(user_id):
-    return user_profiles.find_one({"userId": ObjectId(user_id)})
+    return user_profiles.find_one({"userId": user_id})
 
 
-def require_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return jsonify({"success": False, "error": "Unauthorized"}), 401
-
-        token = auth_header[7:]
-        try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-            user_id = payload.get("sub")
-            if not user_id:
-                return jsonify({"success": False, "error": "Invalid token"}), 401
-
-            user = users.find_one({"_id": ObjectId(user_id)})
-            if not user:
-                return jsonify({"success": False, "error": "User not found"}), 401
-
-            g.user = user
-            g.user_id = user_id
-        except jwt.InvalidTokenError:
-            return jsonify({"success": False, "error": "Invalid token"}), 401
-
-        return f(*args, **kwargs)
-
-    return decorated
+@app.before_request
+def attach_db():
+    g.db = db
 
 
 @app.route("/")
@@ -129,7 +107,11 @@ def signup():
         "createdAt": now,
     }
 
-    result = users.insert_one(user_doc)
+    try:
+        result = users.insert_one(user_doc)
+    except DuplicateKeyError:
+        return jsonify({"success": False, "error": "An account with this email already exists."}), 409
+
     user_id = result.inserted_id
 
     user_profiles.insert_one(
@@ -144,6 +126,9 @@ def signup():
 
     user = users.find_one({"_id": user_id})
     token = create_token(user_id)
+
+    g.user = user
+    log_activity(action="signup", resource_type="user", resource_id=str(user_id))
 
     return jsonify(
         {
@@ -174,6 +159,9 @@ def login():
 
     profile_doc = get_profile_for_user(user["_id"])
     token = create_token(user["_id"])
+
+    g.user = user
+    log_activity(action="login", resource_type="user", resource_id=str(user["_id"]))
 
     return jsonify(
         {
@@ -214,6 +202,12 @@ def update_profile():
     )
 
     return jsonify({"success": True})
+
+
+app.register_blueprint(history_bp)
+app.register_blueprint(analysis_bp)
+app.register_blueprint(favorites_bp)
+app.register_blueprint(activity_bp)
 
 
 if __name__ == "__main__":
