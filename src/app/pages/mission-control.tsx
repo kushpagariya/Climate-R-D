@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "../components/glass-card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -25,6 +25,12 @@ import {
   STATIONS
 } from "../data/radiosonde-data";
 import { BalloonMap } from "../components/balloon-map";
+import { useAuth } from "../auth/use-auth";
+import {
+  fetchMissionReplay,
+  saveRadiosondeApi,
+  serializeBalloonPosition,
+} from "../api/radiosonde";
 
 type ReplaySpeed = 1 | 2 | 5;
 
@@ -36,13 +42,61 @@ export function MissionControl() {
   const [replaySpeed, setReplaySpeed] = useState<ReplaySpeed>(1);
   const mapCardRef = useRef<HTMLDivElement>(null);
   const station = STATIONS[0];
+  const { session } = useAuth();
 
-  const missionData = useMemo(
-    () => generateLiveMissionData(station, elapsedMinutes),
-    [elapsedMinutes, station]
+  const [missionData, setMissionData] = useState(() =>
+    generateLiveMissionData(station, elapsedMinutes),
   );
+  const [missionEvents, setMissionEvents] = useState(() =>
+    detectAtmosphericEvents(generateLiveMissionData(station, elapsedMinutes).observations),
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMissionReplay() {
+      const replay = await fetchMissionReplay(
+        session?.token,
+        station.id,
+        () => generateLiveMissionData(station, elapsedMinutes),
+        detectAtmosphericEvents,
+      );
+
+      if (cancelled) return;
+
+      setMissionData({
+        position: replay.position,
+        trajectory: replay.trajectory,
+        observations: replay.observations,
+      });
+      setMissionEvents(replay.events);
+
+      if (replay.source === "mock" && session?.token) {
+        const launchTime = replay.trajectory[0]?.timestamp ?? new Date();
+        void saveRadiosondeApi(session.token, {
+          stationId: station.id,
+          observations: replay.observations,
+          trajectory: replay.trajectory.map(serializeBalloonPosition),
+          events: replay.events,
+          source: "mock",
+          recordType: "mission",
+          metadata: {
+            launchTime: launchTime.toISOString(),
+            elapsedMinutes,
+            label: `Mission ${station.name}`,
+          },
+        });
+      }
+    }
+
+    void loadMissionReplay();
+    return () => {
+      cancelled = true;
+    };
+  }, [elapsedMinutes, session?.token, station]);
+
   const { position, trajectory, observations } = missionData;
-  const events = detectAtmosphericEvents(observations);
+  const events = missionEvents;
   const finalReplayIndex = Math.max(trajectory.length - 1, 0);
   const safeReplayIndex = Math.min(replayIndex, finalReplayIndex);
   const displayPosition = isLive

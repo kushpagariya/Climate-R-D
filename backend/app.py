@@ -13,6 +13,7 @@ from routes.activity import activity_bp
 from routes.analysis import analysis_bp
 from routes.favorites import favorites_bp
 from routes.history import history_bp
+from routes.radiosonde import radiosonde_bp
 
 load_dotenv()
 
@@ -35,6 +36,7 @@ graph_history = db["graph_history"]
 saved_analyses = db["saved_analyses"]
 favorites = db["favorites"]
 activity_logs = db["activity_logs"]
+radiosonde_history = db["radiosonde_history"]
 
 users.create_index("email", unique=True)
 user_profiles.create_index("userId", unique=True)
@@ -42,6 +44,8 @@ graph_history.create_index([("userId", 1), ("createdAt", -1)])
 saved_analyses.create_index([("userId", 1), ("createdAt", -1)])
 favorites.create_index([("userId", 1), ("createdAt", -1)])
 activity_logs.create_index([("userId", 1), ("createdAt", -1)])
+radiosonde_history.create_index([("stationId", 1), ("date", 1), ("time", 1)])
+radiosonde_history.create_index([("stationId", 1), ("recordType", 1), ("createdAt", -1)])
 
 
 def serialize_user(doc):
@@ -208,6 +212,7 @@ app.register_blueprint(history_bp)
 app.register_blueprint(analysis_bp)
 app.register_blueprint(favorites_bp)
 app.register_blueprint(activity_bp)
+app.register_blueprint(radiosonde_bp)
 
 
 if __name__ == "__main__":

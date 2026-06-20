@@ -47,6 +47,12 @@ import { createGraphHistoryApi, getGraphHistoryApi } from "../api/history";
 import { createSavedAnalysisApi, getSavedAnalysesApi } from "../api/analysis";
 import { createFavoriteApi, getFavoritesApi } from "../api/favorites";
 import { logActivityApi } from "../api/activity";
+import {
+  fetchRadiosondeHistoryRecords,
+  fetchRadiosondeProfile,
+  fetchHistoryOverlayProfile,
+  saveRadiosondeApi,
+} from "../api/radiosonde";
 
 type TimeSlot = "00:00" | "12:00";
 
@@ -185,23 +191,87 @@ export function AtmosphericDashboard() {
   const lastStationRef = useRef(selectedStation);
   const lastDateRef = useRef(selectedDate);
 
-  const data = useMemo<RadiosondeObservation[]>(
-    () => generateRadiosondeProfile(selectedDate, selectedTime, selectedStation),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedDate, selectedTime, selectedStation, refreshKey]
+  const [data, setData] = useState<RadiosondeObservation[]>(() =>
+    generateRadiosondeProfile(selectedDate, selectedTime, selectedStation),
   );
-
-  const balloonHistory = useMemo(
-    () => generateBalloonHistory(selectedStation, 14),
-    [selectedStation]
+  const [balloonHistory, setBalloonHistory] = useState<BalloonRecord[]>(() =>
+    generateBalloonHistory(selectedStation, 14),
   );
+  const [historyData, setHistoryData] = useState<RadiosondeObservation[] | undefined>(undefined);
 
-  const historyData = useMemo<RadiosondeObservation[] | undefined>(() => {
-    if (!activeHistoryId) return undefined;
-    const rec = balloonHistory.find((r) => r.id === activeHistoryId);
-    if (!rec) return undefined;
-    return generateRadiosondeProfile(rec.date, rec.time, rec.stationId);
-  }, [activeHistoryId, balloonHistory]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProfile() {
+      const result = await fetchRadiosondeProfile(
+        session?.token,
+        selectedStation,
+        selectedDate,
+        selectedTime,
+      );
+      if (cancelled) return;
+
+      setData(result.profile);
+
+      if (result.source === "mock" && session?.token) {
+        void saveRadiosondeApi(session.token, {
+          stationId: selectedStation,
+          date: selectedDate,
+          time: selectedTime,
+          observations: result.profile,
+          source: "mock",
+          recordType: "sounding",
+        });
+      }
+    }
+
+    void loadProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate, selectedStation, selectedTime, refreshKey, session?.token]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadHistory() {
+      const records = await fetchRadiosondeHistoryRecords(session?.token, selectedStation);
+      if (!cancelled) {
+        setBalloonHistory(records);
+      }
+    }
+
+    void loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStation, session?.token]);
+
+  useEffect(() => {
+    if (!activeHistoryId) {
+      setHistoryData(undefined);
+      return;
+    }
+
+    let cancelled = false;
+    const record = balloonHistory.find((item) => item.id === activeHistoryId);
+    if (!record) {
+      setHistoryData(undefined);
+      return;
+    }
+
+    async function loadOverlay() {
+      const profile = await fetchHistoryOverlayProfile(session?.token, record!);
+      if (!cancelled) {
+        setHistoryData(profile);
+      }
+    }
+
+    void loadOverlay();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeHistoryId, balloonHistory, session?.token]);
 
   const effectiveCompareData = historyData ?? comparePanelData;
 
@@ -358,6 +428,17 @@ export function AtmosphericDashboard() {
     URL.revokeObjectURL(url);
 
     if (session?.token) {
+      void saveRadiosondeApi(session.token, {
+        stationId: selectedStation,
+        date: selectedDate,
+        time: selectedTime,
+        observations: data,
+        source: "mock",
+        recordType: "sounding",
+        metadata: {
+          label: `${selectedDate} ${selectedTime}`,
+        },
+      });
       void createSavedAnalysisApi(session.token, {
         stationId: selectedStation,
         date: selectedDate,
