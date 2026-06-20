@@ -36,6 +36,16 @@ export function LoginPage() {
 
     if (!nextUser) return;
 
+    if (!nextUser.role) {
+      navigate("/role-selection");
+      return;
+    }
+
+    if (!nextUser.purposes.length) {
+      navigate("/purpose-selection");
+      return;
+    }
+
     navigate("/");
   };
 

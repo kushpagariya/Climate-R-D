@@ -52,9 +52,13 @@ export function SignupPage() {
       return;
     }
 
-    await signup({ fullName, email, password, organization });
-    setSuccess(true);
-    window.setTimeout(() => navigate("/role-selection"), 650);
+    try {
+      await signup({ fullName, email, password, organization });
+      setSuccess(true);
+      window.setTimeout(() => navigate("/role-selection"), 650);
+    } catch {
+      // Error message is surfaced through auth context.
+    }
   };
 
   return (

@@ -15,6 +15,12 @@ export type UserPurpose =
   | "professional-climate-analysis"
   | "personal-interest";
 
+export interface UserProfile {
+  role?: UserRole | null;
+  purposes: UserPurpose[];
+  onboardingComplete: boolean;
+}
+
 export interface AuthUser {
   id: string;
   fullName: string;
@@ -26,6 +32,7 @@ export interface AuthUser {
 
 export interface AuthSession {
   user: AuthUser;
+  token: string;
   rememberMe: boolean;
   createdAt: string;
 }
