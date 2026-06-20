@@ -1,7 +1,7 @@
-import { useRef } from "react";
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "../components/glass-card";
 import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
 import { 
   Activity,
   Gauge,
@@ -14,59 +14,133 @@ import {
   TrendingUp,
   Maximize2,
   AlertTriangle,
-  Info
+  Info,
+  Pause,
+  Play,
+  RotateCcw,
 } from "lucide-react";
 import { 
   generateLiveMissionData,
   detectAtmosphericEvents,
-  STATIONS,
-  type BalloonPosition
+  STATIONS
 } from "../data/radiosonde-data";
 import { BalloonMap } from "../components/balloon-map";
 
+type ReplaySpeed = 1 | 2 | 5;
+
 export function MissionControl() {
-  const [elapsedMinutes, setElapsedMinutes] = useState(45);
+  const [elapsedMinutes] = useState(45);
   const [isLive, setIsLive] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [replayIndex, setReplayIndex] = useState(0);
+  const [replaySpeed, setReplaySpeed] = useState<ReplaySpeed>(1);
   const mapCardRef = useRef<HTMLDivElement>(null);
   const station = STATIONS[0];
 
-  const missionData = generateLiveMissionData(station, elapsedMinutes);
+  const missionData = useMemo(
+    () => generateLiveMissionData(station, elapsedMinutes),
+    [elapsedMinutes, station]
+  );
   const { position, trajectory, observations } = missionData;
   const events = detectAtmosphericEvents(observations);
+  const finalReplayIndex = Math.max(trajectory.length - 1, 0);
+  const safeReplayIndex = Math.min(replayIndex, finalReplayIndex);
+  const displayPosition = isLive
+    ? position
+    : trajectory[safeReplayIndex] ?? position;
+  const telemetryPositionIndex = isLive ? finalReplayIndex : safeReplayIndex;
+  const visibleReplayIndex = isLive ? finalReplayIndex : safeReplayIndex;
+  const replayProgress = trajectory.length > 0
+    ? Math.round(((visibleReplayIndex + 1) / trajectory.length) * 100)
+    : 0;
+
+  useEffect(() => {
+    if (!isPlaying || trajectory.length === 0) return;
+
+    const intervalId = window.setInterval(() => {
+      setReplayIndex((currentIndex) => {
+        if (currentIndex >= finalReplayIndex) {
+          setIsPlaying(false);
+          return finalReplayIndex;
+        }
+
+        const nextIndex = currentIndex + 1;
+        if (nextIndex >= finalReplayIndex) {
+          setIsPlaying(false);
+        }
+        return nextIndex;
+      });
+    }, 1000 / replaySpeed);
+
+    return () => window.clearInterval(intervalId);
+  }, [finalReplayIndex, isPlaying, replaySpeed, trajectory.length]);
+
+  const handlePlay = () => {
+    if (trajectory.length === 0) return;
+    setIsLive(false);
+    setReplayIndex((currentIndex) =>
+      currentIndex >= finalReplayIndex ? 0 : currentIndex
+    );
+    setIsPlaying(true);
+  };
+
+  const handlePause = () => {
+    setIsPlaying(false);
+  };
+
+  const handleReset = () => {
+    setReplayIndex(0);
+    setIsPlaying(false);
+    setIsLive(false);
+  };
+
+  const handleLiveMode = () => {
+    setIsPlaying(false);
+    setIsLive(true);
+  };
   
   // Current observation based on altitude
   const currentObs = observations.reduce(
   (closest, obs) =>
-    Math.abs(obs.height - position.altitude) <
-    Math.abs(closest.height - position.altitude)
+    Math.abs(obs.height - displayPosition.altitude) <
+    Math.abs(closest.height - displayPosition.altitude)
       ? obs
       : closest,
   observations[0]
 );
 
   // Calculate metrics
-  const missionDuration = `${Math.floor(elapsedMinutes / 60)}h ${elapsedMinutes % 60}m`;
+  const displayedMinutes = isLive || trajectory.length === 0
+    ? elapsedMinutes
+    : Math.max(
+        0,
+        Math.round(
+          (displayPosition.timestamp.getTime() - trajectory[0].timestamp.getTime()) /
+            60000
+        )
+      );
+  const missionDuration = `${Math.floor(displayedMinutes / 60)}h ${displayedMinutes % 60}m`;
 
   const distanceTravelled = Math.sqrt(
-    Math.pow((position.lat - station.latitude) * 111, 2) +
-    Math.pow((position.lon - station.longitude) * 111, 2)
+    Math.pow((displayPosition.lat - station.latitude) * 111, 2) +
+    Math.pow((displayPosition.lon - station.longitude) * 111, 2)
   ).toFixed(1);
 
   // Previous position
   const prevPosition =
-    trajectory.length > 1
-      ? trajectory[trajectory.length - 2]
-      : trajectory[0];
+    trajectory.length > 0
+      ? trajectory[Math.max(telemetryPositionIndex - 1, 0)]
+      : displayPosition;
 
   // Vertical Rate (m/s)
   const verticalRate =
-    trajectory.length > 1
+    telemetryPositionIndex > 0
       ? (
-          position.altitude -
+          displayPosition.altitude -
           prevPosition.altitude
         ) /
         (
-          (position.timestamp.getTime() -
+          (displayPosition.timestamp.getTime() -
             prevPosition.timestamp.getTime()) /
           1000
         )
@@ -76,19 +150,19 @@ export function MissionControl() {
   const distanceKmBetweenPoints =
     Math.sqrt(
       Math.pow(
-        (position.lat - prevPosition.lat) * 111,
+        (displayPosition.lat - prevPosition.lat) * 111,
         2
       ) +
       Math.pow(
-        (position.lon - prevPosition.lon) * 111,
+        (displayPosition.lon - prevPosition.lon) * 111,
         2
       )
     );
 
   const deltaTimeSec =
-    trajectory.length > 1
+    telemetryPositionIndex > 0
       ? (
-          position.timestamp.getTime() -
+          displayPosition.timestamp.getTime() -
           prevPosition.timestamp.getTime()
         ) / 1000
       : 1;
@@ -101,13 +175,13 @@ export function MissionControl() {
 
   // Heading (degrees)
   const dLon =
-    position.lon - prevPosition.lon;
+    displayPosition.lon - prevPosition.lon;
 
   const dLat =
-    position.lat - prevPosition.lat;
+    displayPosition.lat - prevPosition.lat;
 
   const currentHeading =
-    trajectory.length > 1
+    telemetryPositionIndex > 0
       ? (
           Math.atan2(dLon, dLat) *
             180 /
@@ -153,15 +227,6 @@ export function MissionControl() {
     }
   };
   
-  const burstPoint =
-    trajectory.reduce(
-      (max, p) =>
-        p.altitude > max.altitude
-          ? p
-          : max,
-      trajectory[0]
-    );
-    
   return (
     <div className="max-w-[1800px] mx-auto p-6 space-y-6">
       {/* Live Status Banner */}
@@ -176,7 +241,10 @@ export function MissionControl() {
             </div>
             <div>
               <h2 className="text-xl">
-                <span className="text-cyan-400">LIVE</span> Radiosonde Mission Control
+                <span className="text-cyan-400">
+                  {isLive ? "LIVE" : isPlaying ? "REPLAYING" : "REPLAY PAUSED"}
+                </span>{" "}
+                Radiosonde Mission Control
               </h2>
               <p className="text-sm text-muted-foreground">
                 {station.name} • Launch: {new Date(Date.now() - elapsedMinutes * 60000).toLocaleTimeString()}
@@ -184,9 +252,9 @@ export function MissionControl() {
             </div>
           </div>
           
-          <Badge className="px-4 py-2 text-base" variant={position.phase === 'ascending' ? 'default' : 'secondary'}>
-            {position.phase === 'ascending' ? '↑ ASCENDING' : 
-             position.phase === 'descending' ? '↓ DESCENDING' : 
+          <Badge className="px-4 py-2 text-base" variant={displayPosition.phase === 'ascending' ? 'default' : 'secondary'}>
+            {displayPosition.phase === 'ascending' ? '↑ ASCENDING' :
+             displayPosition.phase === 'descending' ? '↓ DESCENDING' :
              '✓ COMPLETE'}
           </Badge>
         </div>
@@ -202,9 +270,9 @@ export function MissionControl() {
 
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-lg">Live Flight Tracking</h3>
+                    <h3 className="text-lg">Mission Flight Tracking</h3>
                     <p className="text-sm text-muted-foreground">
-                      Real-time balloon position and trajectory
+                      Live position and historical motion replay
                     </p>
                   </div>
 
@@ -220,9 +288,120 @@ export function MissionControl() {
 
                 <BalloonMap
                   station={station}
-                  position={position}
+                  position={displayPosition}
                   trajectory={trajectory}
+                  travelledIndex={isLive ? finalReplayIndex : safeReplayIndex}
                 />
+
+                <div className="rounded-xl border border-cyan-500/20 bg-slate-950/40 p-4 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="gap-2"
+                        onClick={handlePlay}
+                        disabled={isPlaying || trajectory.length <= 1}
+                      >
+                        <Play className="w-4 h-4" />
+                        Play
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={handlePause}
+                        disabled={!isPlaying}
+                      >
+                        <Pause className="w-4 h-4" />
+                        Pause
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={handleReset}
+                        disabled={trajectory.length === 0}
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        Reset
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={isLive ? "default" : "outline"}
+                        size="sm"
+                        onClick={handleLiveMode}
+                      >
+                        Live
+                      </Button>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      Replay speed
+                      <select
+                        value={replaySpeed}
+                        onChange={(event) => {
+                          const speed = Number(event.target.value);
+                          if (speed === 1 || speed === 2 || speed === 5) {
+                            setReplaySpeed(speed);
+                          }
+                        }}
+                        className="h-9 rounded-md border border-border/60 bg-secondary/60 px-3 text-sm text-foreground outline-none focus:border-cyan-500/60"
+                        aria-label="Replay speed"
+                      >
+                        <option value={1}>1x</option>
+                        <option value={2}>2x</option>
+                        <option value={5}>5x</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Replay Progress</span>
+                      <span className="font-mono text-cyan-300">
+                        {trajectory.length === 0 ? 0 : visibleReplayIndex + 1} / {trajectory.length}
+                        <span className="ml-3 text-foreground">{replayProgress}%</span>
+                      </span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-[width] duration-200"
+                        style={{ width: `${replayProgress}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">
+                      Current Telemetry
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                      <div className="rounded-lg bg-secondary/30 p-3">
+                        <div className="text-[10px] text-muted-foreground">Altitude</div>
+                        <div className="text-sm text-cyan-300">{(displayPosition.altitude / 1000).toFixed(2)} km</div>
+                      </div>
+                      <div className="rounded-lg bg-secondary/30 p-3">
+                        <div className="text-[10px] text-muted-foreground">Latitude</div>
+                        <div className="text-sm text-cyan-300">{displayPosition.lat.toFixed(5)}°</div>
+                      </div>
+                      <div className="rounded-lg bg-secondary/30 p-3">
+                        <div className="text-[10px] text-muted-foreground">Longitude</div>
+                        <div className="text-sm text-blue-300">{displayPosition.lon.toFixed(5)}°</div>
+                      </div>
+                      <div className="rounded-lg bg-secondary/30 p-3">
+                        <div className="text-[10px] text-muted-foreground">Mission Phase</div>
+                        <div className="text-sm text-foreground capitalize">{displayPosition.phase}</div>
+                      </div>
+                      <div className="rounded-lg bg-secondary/30 p-3 col-span-2 md:col-span-1">
+                        <div className="text-[10px] text-muted-foreground">Timestamp</div>
+                        <div className="text-sm text-foreground">{displayPosition.timestamp.toLocaleString()}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
               </div>
             </GlassCard>
@@ -246,7 +425,7 @@ export function MissionControl() {
                   <TrendingUp className="w-4 h-4 text-blue-400" />
                   <span className="text-xs">Altitude</span>
                 </div>
-                <div className="text-2xl text-blue-400">{(position.altitude / 1000).toFixed(2)}</div>
+                <div className="text-2xl text-blue-400">{(displayPosition.altitude / 1000).toFixed(2)}</div>
                 <div className="text-xs text-muted-foreground">km</div>
               </div>
 
@@ -412,11 +591,11 @@ export function MissionControl() {
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between">
                     <span>Latitude:</span>
-                    <span className="text-cyan-400">{position.lat.toFixed(4)}°N</span>
+                    <span className="text-cyan-400">{displayPosition.lat.toFixed(4)}°N</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Longitude:</span>
-                    <span className="text-blue-400">{position.lon.toFixed(4)}°E</span>
+                    <span className="text-blue-400">{displayPosition.lon.toFixed(4)}°E</span>
                   </div>
                 </div>
               </div>

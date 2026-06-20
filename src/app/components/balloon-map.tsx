@@ -5,9 +5,15 @@ interface Props {
   station: RadiosondeStation;
   position: BalloonPosition;
   trajectory: BalloonPosition[];
+  travelledIndex?: number;
 }
 
-export function BalloonMap({ station, position, trajectory }: Props) {
+export function BalloonMap({
+  station,
+  position,
+  trajectory,
+  travelledIndex = trajectory.length - 1,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -95,6 +101,31 @@ export function BalloonMap({ station, position, trajectory }: Props) {
       }
     });
     ctx.stroke();
+
+    // Highlight the portion already travelled during motion replay.
+    const travelledPointCount = Math.min(
+      Math.max(travelledIndex + 1, 0),
+      trajectory.length
+    );
+    if (travelledPointCount > 1) {
+      ctx.save();
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 4;
+      ctx.shadowColor = 'rgba(34, 211, 238, 0.65)';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      trajectory.slice(0, travelledPointCount).forEach((pos, i) => {
+        const x = lonToX(pos.lon);
+        const y = latToY(pos.lat);
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Draw trajectory points
     trajectory.forEach((pos, i) => {
@@ -238,7 +269,7 @@ export function BalloonMap({ station, position, trajectory }: Props) {
     );
 
 
-  }, [station, position, trajectory]);
+  }, [station, position, trajectory, travelledIndex]);
 
   return (
     <div className="relative w-full h-[500px] bg-gradient-to-br from-slate-900/50 to-slate-800/50 rounded-lg overflow-hidden border border-border/30">
