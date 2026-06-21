@@ -14,6 +14,10 @@ from routes.analysis import analysis_bp
 from routes.favorites import favorites_bp
 from routes.history import history_bp
 from routes.radiosonde import radiosonde_bp
+from routes.stations import stations_bp
+from routes.datasets import datasets_bp
+from routes.analytics import analytics_bp
+from routes.data_quality import data_quality_bp
 
 load_dotenv()
 
@@ -37,6 +41,9 @@ saved_analyses = db["saved_analyses"]
 favorites = db["favorites"]
 activity_logs = db["activity_logs"]
 radiosonde_history = db["radiosonde_history"]
+weather_stations = db["weather_stations"]
+datasets = db["datasets"]
+weather_records = db["weather_records"]
 
 users.create_index("email", unique=True)
 user_profiles.create_index("userId", unique=True)
@@ -46,6 +53,9 @@ favorites.create_index([("userId", 1), ("createdAt", -1)])
 activity_logs.create_index([("userId", 1), ("createdAt", -1)])
 radiosonde_history.create_index([("stationId", 1), ("date", 1), ("time", 1)])
 radiosonde_history.create_index([("stationId", 1), ("recordType", 1), ("createdAt", -1)])
+weather_stations.create_index("stationId", unique=True)
+datasets.create_index([("stationId", 1), ("createdAt", -1)])
+weather_records.create_index([("stationId", 1), ("date", 1), ("time", 1)])
 
 
 def serialize_user(doc):
@@ -213,6 +223,10 @@ app.register_blueprint(analysis_bp)
 app.register_blueprint(favorites_bp)
 app.register_blueprint(activity_bp)
 app.register_blueprint(radiosonde_bp)
+app.register_blueprint(stations_bp)
+app.register_blueprint(datasets_bp)
+app.register_blueprint(analytics_bp)
+app.register_blueprint(data_quality_bp)
 
 
 if __name__ == "__main__":
