@@ -121,7 +121,7 @@ def _persist_latest_sounding(db, station_id, site_id, last_seconds):
             "stationId": station_id,
             "date": date_val,
             "time": time_val,
-            "recordType": {"$ne": "mission"},
+            "recordType": {"$nin": ["mission", "balloon"]},
         }
     )
 
@@ -157,7 +157,7 @@ def _build_stale_payload(db, station_id):
     sounding = history_col.find_one(
         {
             "stationId": station_id,
-            "recordType": {"$ne": "mission"},
+            "recordType": {"$nin": ["mission", "balloon"]},
             "observations": {"$exists": True, "$ne": []},
         },
         sort=[("createdAt", -1)],

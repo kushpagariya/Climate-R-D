@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 import jwt
@@ -7,16 +7,32 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from flask import g, jsonify, request
 
-JWT_SECRET = os.getenv("JWT_SECRET", "indravani-dev-secret-change-in-production")
+JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
+JWT_EXPIRES_HOURS = int(os.getenv("JWT_EXPIRES_HOURS", "24"))
 
 
 def utc_now():
     return datetime.now(timezone.utc)
 
 
+def _require_jwt_secret():
+    if not JWT_SECRET or JWT_SECRET == "indravani-dev-secret-change-in-production":
+        # Allow dev default only when explicitly flagged
+        if os.getenv("FLASK_ENV", "").lower() != "development":
+            raise RuntimeError("JWT_SECRET must be set to a strong value in production.")
+
+
 def create_token(user_id):
-    return jwt.encode({"sub": str(user_id)}, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    _require_jwt_secret()
+    secret = JWT_SECRET or "indravani-dev-secret-change-in-production"
+    expires_at = utc_now() + timedelta(hours=JWT_EXPIRES_HOURS)
+    payload = {
+        "sub": str(user_id),
+        "exp": expires_at,
+        "iat": utc_now(),
+    }
+    return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
 
 
 def require_auth(f):
@@ -27,8 +43,10 @@ def require_auth(f):
             return jsonify({"success": False, "error": "Unauthorized"}), 401
 
         token = auth_header[7:]
+        secret = JWT_SECRET or "indravani-dev-secret-change-in-production"
+
         try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
             user_id = payload.get("sub")
             if not user_id:
                 return jsonify({"success": False, "error": "Invalid token"}), 401
@@ -45,6 +63,8 @@ def require_auth(f):
 
             g.user = user
             g.user_id = str(user["_id"])
+        except jwt.ExpiredSignatureError:
+            return jsonify({"success": False, "error": "Token expired"}), 401
         except jwt.InvalidTokenError:
             return jsonify({"success": False, "error": "Invalid token"}), 401
 

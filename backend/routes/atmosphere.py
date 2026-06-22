@@ -29,7 +29,7 @@ def _safe_round(value, digits=2):
 
 def _find_sounding(db, station_id=None, date=None, time=None):
     query = {
-        "recordType": {"$ne": "mission"},
+        "recordType": {"$nin": ["mission", "balloon"]},
         "observations": {"$exists": True, "$ne": []},
     }
     if station_id:

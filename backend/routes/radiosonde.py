@@ -5,6 +5,16 @@ from auth_utils import require_auth, utc_now, log_activity
 
 radiosonde_bp = Blueprint("radiosonde", __name__)
 
+SOUNDING_RECORD_TYPES = {"$nin": ["mission", "balloon"]}
+
+
+def _parse_limit(value, default=50, maximum=500):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(parsed, maximum))
+
 
 def calculate_atmospheric_parameters(observations):
     if not observations:
@@ -150,7 +160,7 @@ def list_radiosonde_history():
         return jsonify({"success": False, "error": "stationId is required."}), 400
 
     record_type = request.args.get("recordType")
-    limit = int(request.args.get("limit", 50))
+    limit = _parse_limit(request.args.get("limit"), default=50, maximum=500)
 
     query = {"stationId": station_id}
     if record_type:
@@ -218,7 +228,7 @@ def save_radiosonde():
                 "stationId": station_id,
                 "date": date,
                 "time": time,
-                "recordType": {"$ne": "mission"},
+                "recordType": SOUNDING_RECORD_TYPES
             }
         )
         if existing:

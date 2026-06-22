@@ -47,7 +47,7 @@ def _find_latest_weather_record(db, station_id=None):
 
 def _find_surface_radiosonde_observation(db, station_id):
     query = {
-        "recordType": {"$ne": "mission"},
+        "recordType": {"$nin": ["mission", "balloon"]},
         "observations": {"$exists": True, "$ne": []},
     }
     if station_id:
