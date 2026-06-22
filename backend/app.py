@@ -9,6 +9,7 @@ from flask_cors import CORS
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 
+from routes.balloons import balloons_bp
 from auth_utils import create_token, require_auth, utc_now, log_activity
 from routes.activity import activity_bp
 from routes.analysis import analysis_bp
@@ -60,6 +61,8 @@ favorites.create_index([("userId", 1), ("createdAt", -1)])
 activity_logs.create_index([("userId", 1), ("createdAt", -1)])
 radiosonde_history.create_index([("stationId", 1), ("date", 1), ("time", 1)])
 radiosonde_history.create_index([("stationId", 1), ("recordType", 1), ("createdAt", -1)])
+radiosonde_history.create_index([("recordType", 1), ("metadata.serial", 1)])
+radiosonde_history.create_index([("recordType", 1), ("updatedAt", -1)])
 weather_stations.create_index("stationId", unique=True)
 datasets.create_index([("stationId", 1), ("createdAt", -1)])
 weather_records.create_index([("stationId", 1), ("date", 1), ("time", 1)])
@@ -415,6 +418,7 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(weather_bp)
 app.register_blueprint(atmosphere_bp)
 app.register_blueprint(telemetry_bp)
+app.register_blueprint(balloons_bp)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
