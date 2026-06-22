@@ -20,6 +20,7 @@ from routes.stations import stations_bp
 from routes.datasets import datasets_bp
 from routes.analytics import analytics_bp
 from routes.data_quality import data_quality_bp
+from routes.dashboard import dashboard_bp
 
 load_dotenv()
 
@@ -406,6 +407,7 @@ app.register_blueprint(datasets_bp)
 app.register_blueprint(analytics_bp)
 app.register_blueprint(data_quality_bp)
 app.register_blueprint(missions_bp)
+app.register_blueprint(dashboard_bp)
 
 
 if __name__ == "__main__":
