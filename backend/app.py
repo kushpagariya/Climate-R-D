@@ -21,6 +21,8 @@ from routes.datasets import datasets_bp
 from routes.analytics import analytics_bp
 from routes.data_quality import data_quality_bp
 from routes.dashboard import dashboard_bp
+from routes.weather import weather_bp
+from routes.atmosphere import atmosphere_bp
 
 load_dotenv()
 
@@ -408,7 +410,8 @@ app.register_blueprint(analytics_bp)
 app.register_blueprint(data_quality_bp)
 app.register_blueprint(missions_bp)
 app.register_blueprint(dashboard_bp)
-
+app.register_blueprint(weather_bp)
+app.register_blueprint(atmosphere_bp)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
