@@ -23,6 +23,7 @@ from routes.data_quality import data_quality_bp
 from routes.dashboard import dashboard_bp
 from routes.weather import weather_bp
 from routes.atmosphere import atmosphere_bp
+from routes.telemetry import telemetry_bp
 
 load_dotenv()
 
@@ -62,6 +63,7 @@ radiosonde_history.create_index([("stationId", 1), ("recordType", 1), ("createdA
 weather_stations.create_index("stationId", unique=True)
 datasets.create_index([("stationId", 1), ("createdAt", -1)])
 weather_records.create_index([("stationId", 1), ("date", 1), ("time", 1)])
+weather_records.create_index([("stationId", 1), ("date", 1), ("time", 1), ("serial", 1)])
 missions.create_index("missionId", unique=True)
 missions.create_index([("userId", 1), ("createdAt", -1)])
 
@@ -412,6 +414,7 @@ app.register_blueprint(missions_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(weather_bp)
 app.register_blueprint(atmosphere_bp)
+app.register_blueprint(telemetry_bp)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

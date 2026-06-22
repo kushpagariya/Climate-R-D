@@ -10,6 +10,7 @@ persist normalized payloads into MongoDB collections.
 
 from __future__ import annotations
 
+import socket
 import json
 import math
 import os
