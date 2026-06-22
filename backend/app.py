@@ -1,4 +1,5 @@
 import os
+import re
 
 import bcrypt
 from bson import ObjectId
@@ -13,6 +14,7 @@ from routes.activity import activity_bp
 from routes.analysis import analysis_bp
 from routes.favorites import favorites_bp
 from routes.history import history_bp
+from routes.missions import missions_bp
 from routes.radiosonde import radiosonde_bp
 from routes.stations import stations_bp
 from routes.datasets import datasets_bp
@@ -44,6 +46,7 @@ radiosonde_history = db["radiosonde_history"]
 weather_stations = db["weather_stations"]
 datasets = db["datasets"]
 weather_records = db["weather_records"]
+missions = db["missions"]
 
 users.create_index("email", unique=True)
 user_profiles.create_index("userId", unique=True)
@@ -56,6 +59,18 @@ radiosonde_history.create_index([("stationId", 1), ("recordType", 1), ("createdA
 weather_stations.create_index("stationId", unique=True)
 datasets.create_index([("stationId", 1), ("createdAt", -1)])
 weather_records.create_index([("stationId", 1), ("date", 1), ("time", 1)])
+missions.create_index("missionId", unique=True)
+missions.create_index([("userId", 1), ("createdAt", -1)])
+
+PROFILE_ROLES = {
+    "student",
+    "teacher",
+    "researcher",
+    "climate-scientist",
+    "weather-analyst",
+    "organization-employee",
+}
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def serialize_user(doc):
@@ -103,6 +118,80 @@ def serialize_profile(doc):
             False
         ),
     }
+
+
+def serialize_api_profile(user, profile):
+    created_at = profile.get("createdAt") or user.get("createdAt")
+    updated_at = profile.get("updatedAt") or created_at
+    return {
+        "name": user.get("fullName", ""),
+        "email": user.get("email", ""),
+        "role": profile.get("role"),
+        "purpose": profile.get("purpose"),
+        "onboardingComplete": profile.get("onboardingComplete", False),
+        "hasSeenPreLaunch": profile.get("hasSeenPreLaunch", False),
+        "createdAt": created_at.isoformat() if created_at else None,
+        "updatedAt": updated_at.isoformat() if updated_at else None,
+    }
+
+
+def validate_profile_payload(data):
+    if not isinstance(data, dict):
+        return None, "Request body must be a JSON object."
+
+    mutable_fields = {
+        "name",
+        "email",
+        "role",
+        "purpose",
+        "onboardingComplete",
+        "hasSeenPreLaunch",
+    }
+    unknown_fields = set(data) - mutable_fields
+    if unknown_fields:
+        return None, f"Unsupported profile field: {sorted(unknown_fields)[0]}."
+    if not data:
+        return None, "At least one profile field is required."
+
+    updates = {}
+    if "name" in data:
+        if not isinstance(data["name"], str) or not data["name"].strip():
+            return None, "name must be a non-empty string."
+        if len(data["name"].strip()) > 120:
+            return None, "name must be 120 characters or fewer."
+        updates["name"] = data["name"].strip()
+
+    if "email" in data:
+        if not isinstance(data["email"], str):
+            return None, "email must be a string."
+        email = data["email"].strip().lower()
+        if len(email) > 254 or not EMAIL_PATTERN.fullmatch(email):
+            return None, "email must be a valid email address."
+        updates["email"] = email
+
+    if "role" in data:
+        role = data["role"]
+        if role is not None and role not in PROFILE_ROLES:
+            return None, "role is not supported."
+        updates["role"] = role
+
+    if "purpose" in data:
+        purpose = data["purpose"]
+        if purpose is not None:
+            if not isinstance(purpose, str) or not purpose.strip():
+                return None, "purpose must be a non-empty string or null."
+            if len(purpose.strip()) > 200:
+                return None, "purpose must be 200 characters or fewer."
+            purpose = purpose.strip()
+        updates["purpose"] = purpose
+
+    for field in ("onboardingComplete", "hasSeenPreLaunch"):
+        if field in data:
+            if not isinstance(data[field], bool):
+                return None, f"{field} must be a boolean."
+            updates[field] = data[field]
+
+    return updates, None
 
 
 def get_profile_for_user(user_id):
@@ -159,6 +248,7 @@ def signup():
             "purposes": [],
             "onboardingComplete": False,
             "hasSeenPreLaunch": False,
+            "createdAt": now,
             "updatedAt": now,
         }
     )
@@ -226,20 +316,28 @@ def update_profile():
     updates = {"updatedAt": utc_now()}
 
     if "role" in data:
-        updates["role"] = data.get("role")
+        role = data.get("role")
+        if role is not None and role not in PROFILE_ROLES:
+            return jsonify({"success": False, "error": "role is not supported."}), 400
+        updates["role"] = role
 
     if "purposes" in data:
-        updates["purposes"] = data.get("purposes") or []
+        purposes = data.get("purposes")
+        if not isinstance(purposes, list) or any(
+            not isinstance(item, str) or not item.strip() for item in purposes
+        ):
+            return jsonify({"success": False, "error": "purposes must be an array of strings."}), 400
+        updates["purposes"] = [item.strip() for item in purposes]
 
     if "onboardingComplete" in data:
-        updates["onboardingComplete"] = bool(
-            data.get("onboardingComplete")
-        )
+        if not isinstance(data.get("onboardingComplete"), bool):
+            return jsonify({"success": False, "error": "onboardingComplete must be a boolean."}), 400
+        updates["onboardingComplete"] = data["onboardingComplete"]
 
     if "hasSeenPreLaunch" in data:
-        updates["hasSeenPreLaunch"] = bool(
-            data.get("hasSeenPreLaunch")
-        )
+        if not isinstance(data.get("hasSeenPreLaunch"), bool):
+            return jsonify({"success": False, "error": "hasSeenPreLaunch must be a boolean."}), 400
+        updates["hasSeenPreLaunch"] = data["hasSeenPreLaunch"]
 
     user_profiles.update_one(
         {"userId": g.user["_id"]},
@@ -248,6 +346,54 @@ def update_profile():
     )
 
     return jsonify({"success": True})
+
+
+@app.route("/api/profile", methods=["GET"])
+@require_auth
+def get_api_profile():
+    profile = get_profile_for_user(g.user["_id"]) or {}
+    return jsonify({"success": True, "profile": serialize_api_profile(g.user, profile)})
+
+
+@app.route("/api/profile", methods=["PUT"])
+@require_auth
+def update_api_profile():
+    data = request.get_json(silent=True)
+    updates, error = validate_profile_payload(data)
+    if error:
+        return jsonify({"success": False, "error": error}), 400
+
+    user_updates = {}
+    if "name" in updates:
+        user_updates["fullName"] = updates.pop("name")
+    if "email" in updates:
+        email = updates.pop("email")
+        existing = users.find_one({"email": email, "_id": {"$ne": g.user["_id"]}})
+        if existing:
+            return jsonify({"success": False, "error": "An account with this email already exists."}), 409
+        user_updates["email"] = email
+
+    now = utc_now()
+    if user_updates:
+        user_updates["updatedAt"] = now
+        try:
+            users.update_one({"_id": g.user["_id"]}, {"$set": user_updates})
+        except DuplicateKeyError:
+            return jsonify({"success": False, "error": "An account with this email already exists."}), 409
+
+    updates["updatedAt"] = now
+    user_profiles.update_one(
+        {"userId": g.user["_id"]},
+        {
+            "$set": updates,
+            "$setOnInsert": {"createdAt": g.user.get("createdAt", now)},
+        },
+        upsert=True,
+    )
+
+    user = users.find_one({"_id": g.user["_id"]})
+    profile = get_profile_for_user(g.user["_id"]) or {}
+    return jsonify({"success": True, "profile": serialize_api_profile(user, profile)})
 
 
 app.register_blueprint(history_bp)
@@ -259,6 +405,7 @@ app.register_blueprint(stations_bp)
 app.register_blueprint(datasets_bp)
 app.register_blueprint(analytics_bp)
 app.register_blueprint(data_quality_bp)
+app.register_blueprint(missions_bp)
 
 
 if __name__ == "__main__":

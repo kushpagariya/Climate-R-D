@@ -4,6 +4,7 @@ from functools import wraps
 
 import jwt
 from bson import ObjectId
+from bson.errors import InvalidId
 from flask import g, jsonify, request
 
 JWT_SECRET = os.getenv("JWT_SECRET", "indravani-dev-secret-change-in-production")
@@ -32,8 +33,13 @@ def require_auth(f):
             if not user_id:
                 return jsonify({"success": False, "error": "Invalid token"}), 401
 
+            try:
+                object_id = ObjectId(user_id)
+            except (InvalidId, TypeError):
+                return jsonify({"success": False, "error": "Invalid token"}), 401
+
             users = g.db["users"]
-            user = users.find_one({"_id": ObjectId(user_id)})
+            user = users.find_one({"_id": object_id})
             if not user:
                 return jsonify({"success": False, "error": "User not found"}), 401
 
