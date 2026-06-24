@@ -31,7 +31,8 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-client = MongoClient(os.getenv("MONGO_URI"))
+import certifi
+client = MongoClient(os.getenv("MONGO_URI"), tlsCAFile=certifi.where())
 
 try:
     client.admin.command("ping")
