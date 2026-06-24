@@ -7,3 +7,4 @@ PyJWT
 pandas
 openpyxl
 gunicorn
+certifi
