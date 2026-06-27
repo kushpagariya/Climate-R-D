@@ -120,7 +120,7 @@ function KpiCard({
           {label}
         </div>
         <div className="flex items-end gap-1">
-          <span className="text-3xl font-light" style={{ color }}>
+          <span className="text-2xl md:text-3xl font-light" style={{ color }}>
             {value}
           </span>
           <span className="text-sm text-slate-400 mb-0.5">{unit}</span>
@@ -559,7 +559,7 @@ export function AtmosphericDashboard() {
 
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-[1800px] mx-auto p-5 space-y-5">
+        <div className="max-w-[1800px] mx-auto p-4 space-y-4 md:p-5 md:space-y-5">
           {/* §00 */}
           <SectionLabel code="§00" title="KEY PERFORMANCE INDICATORS" />
 
@@ -706,7 +706,7 @@ export function AtmosphericDashboard() {
           )}
 
           {/* KPI Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <KpiCard
               icon={<Thermometer className="w-4 h-4" />}
               label="Temperature"
@@ -821,7 +821,7 @@ export function AtmosphericDashboard() {
 
           {/* §02 WIND ANALYTICS */}
           <SectionLabel code="§02" title="WIND ANALYTICS" />
-          <div className="grid lg:grid-cols-2 gap-5">
+          <div className="grid lg:grid-cols-2 gap-4 md:gap-5">
             <GlassCard>
               <ChartZoomWrapper
                 data={data}
@@ -850,7 +850,7 @@ export function AtmosphericDashboard() {
 
           {/* §03 MOISTURE ANALYTICS */}
           <SectionLabel code="§03" title="MOISTURE ANALYTICS" />
-          <div className="grid lg:grid-cols-2 gap-5">
+          <div className="grid lg:grid-cols-2 gap-4 md:gap-5">
             <GlassCard>
               <ChartZoomWrapper
                 data={data}
@@ -882,7 +882,7 @@ export function AtmosphericDashboard() {
 
           {/* §04 ATMOSPHERIC CONDITIONS */}
           <SectionLabel code="§04" title="ATMOSPHERIC CONDITIONS" />
-          <div className="grid lg:grid-cols-2 gap-5">
+          <div className="grid lg:grid-cols-2 gap-4 md:gap-5">
             <GlassCard>
               <ChartZoomWrapper
                 data={data}

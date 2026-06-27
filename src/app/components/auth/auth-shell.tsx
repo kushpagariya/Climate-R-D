@@ -44,7 +44,7 @@ export function AuthShell({ children, eyebrow, title, description, footer }: Aut
         </header>
 
         <main className="grid flex-1 items-center gap-8 py-8 lg:grid-cols-[1fr_520px] lg:py-12">
-          <section className="order-2 lg:order-1">
+          <section className="flex flex-col items-center text-center lg:items-start lg:text-left">
             <AuthBrand />
 
             <div className="mt-10 hidden max-w-xl grid-cols-3 gap-3 lg:grid">
@@ -66,15 +66,15 @@ export function AuthShell({ children, eyebrow, title, description, footer }: Aut
             </div>
           </section>
 
-          <section className="order-1 lg:order-2">
-            <div className="rounded-2xl border border-cyan-500/20 bg-card/55 p-1 shadow-2xl shadow-black/30 backdrop-blur-xl transition-shadow duration-300 hover:shadow-cyan-500/10">
+          <section className="w-[95%] max-w-md mx-auto lg:w-full lg:max-w-none">
+            <div className="rounded-2xl border border-cyan-500/20 bg-card/55 p-1 shadow-2xl shadow-black/30 backdrop-blur-xl transition-shadow duration-300 hover:shadow-cyan-500/10 w-full">
               <div className="rounded-xl border border-cyan-500/10 bg-[#08111f]/70 p-5 shadow-inner shadow-cyan-500/5 sm:p-6">
                 <div className="mb-6 space-y-2">
                   <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-widest text-cyan-400">
                     <CloudRain className="w-3.5 h-3.5" />
                     {eyebrow}
                   </div>
-                  <h2 className="text-2xl font-light text-foreground">{title}</h2>
+                  <h2 className="text-xl md:text-2xl font-light text-foreground">{title}</h2>
                   <p className="text-sm leading-6 text-muted-foreground">{description}</p>
                 </div>
                 {children}

@@ -307,7 +307,7 @@ export function MissionControl() {
   };
   
   return (
-    <div className="max-w-[1800px] mx-auto p-6 space-y-6">
+    <div className="max-w-[1800px] mx-auto p-4 md:p-6 space-y-4 md:space-y-6">
       {/* Live Status Banner */}
       <GlassCard className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-cyan-500/30">
         <div className="flex items-center justify-between">
@@ -339,7 +339,7 @@ export function MissionControl() {
         </div>
       </GlassCard>
 
-      <div className="grid lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Left Column: Map and Telemetry */}
         <div className="lg:col-span-2 space-y-6">
           {/* Flight Map */}

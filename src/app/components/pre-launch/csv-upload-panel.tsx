@@ -129,28 +129,30 @@ export function CsvUploadPanel({ onParsed }: Props) {
             Preview First 10 Rows
           </div>
           <div className="rounded-lg border border-border/60">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {REQUIRED_CSV_COLUMNS.map((column) => (
-                    <TableHead key={column} className="text-[11px]">
-                      {column}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {preview.previewRows.map((row, index) => (
-                  <TableRow key={`${row.pressure_hPa}-${index}`}>
+            <div className="overflow-x-auto w-full">
+              <Table className="min-w-[600px]">
+                <TableHeader>
+                  <TableRow>
                     {REQUIRED_CSV_COLUMNS.map((column) => (
-                      <TableCell key={column} className="text-xs">
-                        {row[column]}
-                      </TableCell>
+                      <TableHead key={column} className="text-[11px]">
+                        {column}
+                      </TableHead>
                     ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {preview.previewRows.map((row, index) => (
+                    <TableRow key={`${row.pressure_hPa}-${index}`}>
+                      {REQUIRED_CSV_COLUMNS.map((column) => (
+                        <TableCell key={column} className="text-xs">
+                          {row[column]}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         </div>
       )}

@@ -5,11 +5,12 @@ import {
   History,
   LogOut,
   MapPinned,
+  Menu,
   Radar,
   Settings,
   UserCircle,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../auth/use-auth";
 import {
   DropdownMenu,
@@ -19,6 +20,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "../components/ui/sheet";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: Cloud },
@@ -40,6 +48,7 @@ export function Root() {
   const location = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, isLoading, logout, user } = useAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Set dark mode by default
   useEffect(() => {
@@ -85,7 +94,72 @@ export function Root() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex md:hidden items-center gap-2">
+              <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+                <SheetTrigger asChild>
+                  <button className="p-2 rounded-lg border border-cyan-500/25 bg-blue-950/40 text-cyan-300 transition-all hover:bg-cyan-500/15">
+                    <Menu className="w-5 h-5" />
+                  </button>
+                </SheetTrigger>
+                <SheetContent side="left" className="bg-[#08111f] border-r border-border/50">
+                  <SheetHeader>
+                    <SheetTitle className="text-left text-cyan-400 text-lg">Menu</SheetTitle>
+                  </SheetHeader>
+                  <div className="flex flex-col gap-2 mt-6">
+                    {navItems.map((item) => {
+                      const Icon = item.icon;
+                      const active = item.to.includes("?")
+                        ? `${location.pathname}${location.search}` === item.to
+                        : location.pathname === item.to;
+                      return (
+                        <Link
+                          key={item.to}
+                          to={item.to}
+                          onClick={() => setMobileMenuOpen(false)}
+                          className={`px-4 py-3 rounded-lg transition-all flex items-center gap-3 ${
+                            active
+                              ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                              : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                          }`}
+                        >
+                          <Icon className="w-5 h-5" />
+                          <span className="text-sm">{item.label}</span>
+                        </Link>
+                      );
+                    })}
+                    <div className="h-px bg-border/50 my-2" />
+                    <Link
+                      to="/profile"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="px-4 py-3 rounded-lg transition-all flex items-center gap-3 text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                    >
+                      <UserCircle className="w-5 h-5" />
+                      <span className="text-sm">Profile</span>
+                    </Link>
+                    <Link
+                      to="/settings"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="px-4 py-3 rounded-lg transition-all flex items-center gap-3 text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                    >
+                      <Settings className="w-5 h-5" />
+                      <span className="text-sm">Settings</span>
+                    </Link>
+                    <button
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        handleLogout();
+                      }}
+                      className="px-4 py-3 rounded-lg transition-all flex items-center gap-3 text-red-400 hover:bg-red-500/10"
+                    >
+                      <LogOut className="w-5 h-5" />
+                      <span className="text-sm">Logout</span>
+                    </button>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+
+            <div className="hidden md:flex flex-wrap items-center gap-2">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = item.to.includes("?")
