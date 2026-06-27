@@ -2,7 +2,6 @@ import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import {
   Cloud,
   Database,
-  GitCompare,
   History,
   LogOut,
   MapPinned,
@@ -25,10 +24,8 @@ const navItems = [
   { to: "/", label: "Dashboard", icon: Cloud },
   { to: "/mission-control", label: "Mission Control", icon: Radar },
   { to: "/mission-history", label: "Historical Analysis", icon: History },
-  { to: "/?compare=true", label: "Compare Soundings", icon: GitCompare },
   { to: "/pre-launch", label: "Pre-Launch Setup", icon: Database },
   { to: "/live-tracking", label: "Live Tracking", icon: MapPinned },
-  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 function formatRole(role?: string) {
@@ -146,14 +143,6 @@ export function Root() {
                   <DropdownMenuItem onSelect={() => navigate("/settings")}>
                     <Settings className="w-4 h-4" />
                     Settings
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => navigate("/mission-history")}>
-                    <History className="w-4 h-4" />
-                    Mission History
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => navigate("/pre-launch")}>
-                    <Database className="w-4 h-4" />
-                    Pre-Launch Data
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={handleLogout}>
