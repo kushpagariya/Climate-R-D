@@ -2,6 +2,7 @@ from bson import ObjectId
 from flask import Blueprint, g, jsonify, request
 
 from auth_utils import require_auth, utc_now, log_activity
+from services.sondehub_service import get_sondehub_service, SondeHubError
 
 radiosonde_bp = Blueprint("radiosonde", __name__)
 
@@ -123,6 +124,41 @@ def get_radiosonde():
     )
 
     if not doc:
+        # Fallback 1: Try matching just the date (handles SondeHub timestamps like 11:32 for a 12:00 launch)
+        doc = g.db["radiosonde_history"].find_one(
+            {
+                "stationId": station_id,
+                "date": date,
+                "recordType": {"$ne": "mission"},
+            },
+            sort=[("time", -1)]
+        )
+
+    if not doc:
+        # Fallback 2: Fetch real data from SondeHub
+        try:
+            service = get_sondehub_service()
+            sonde_payload = service.fetch_latest_site_sounding(
+                station_id=station_id,
+                site_id=station_id,
+                last_seconds=7 * 24 * 3600
+            )
+            if sonde_payload:
+                serial = sonde_payload.get("metadata", {}).get("serial")
+                if serial:
+                    existing = g.db["radiosonde_history"].find_one({"stationId": station_id, "metadata.serial": serial})
+                    if existing:
+                        doc = existing
+                    else:
+                        sonde_payload["userId"] = g.user["_id"]
+                        sonde_payload["createdAt"] = utc_now()
+                        # Preserve original SondeHub date/time as requested
+                        g.db["radiosonde_history"].insert_one(sonde_payload)
+                        doc = sonde_payload
+        except SondeHubError:
+            pass
+
+    if not doc:
         return jsonify({"success": False, "error": "Radiosonde record not found."}), 404
 
     log_activity(
@@ -174,8 +210,39 @@ def list_radiosonde_history():
         .sort("createdAt", -1)
         .limit(max(1, min(limit, 500)))
     )
+    docs = list(cursor)
 
-    items = [serialize_radiosonde_summary(doc) for doc in cursor]
+    if not docs and not record_type:
+        # If DB is empty, fetch live station data from SondeHub to populate history
+        try:
+            service = get_sondehub_service()
+            live_data = service.fetch_live_station_data(site_id=station_id, last_seconds=7*24*3600)
+            if live_data and live_data.get("serials"):
+                serials = list(reversed(live_data["serials"]))[:3]  # fetch up to 3 latest
+                now = utc_now()
+                for serial in serials:
+                    if not g.db["radiosonde_history"].find_one({"stationId": station_id, "metadata.serial": serial}):
+                        try:
+                            payload = service.fetch_historical_sounding(station_id=station_id, serial=serial)
+                            if payload:
+                                payload["userId"] = g.user["_id"]
+                                payload["createdAt"] = now
+                                g.db["radiosonde_history"].insert_one(payload)
+                        except SondeHubError:
+                            continue
+                
+                # Re-query after ingestion
+                cursor = (
+                    g.db["radiosonde_history"]
+                    .find(query)
+                    .sort("createdAt", -1)
+                    .limit(max(1, min(limit, 500)))
+                )
+                docs = list(cursor)
+        except SondeHubError:
+            pass
+
+    items = [serialize_radiosonde_summary(doc) for doc in docs]
     return jsonify({"success": True, "items": items})
 
 
