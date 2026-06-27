@@ -16,6 +16,7 @@ from routes.analysis import analysis_bp
 from routes.favorites import favorites_bp
 from routes.history import history_bp
 from routes.missions import missions_bp
+from routes.launches import launches_bp
 from routes.radiosonde import radiosonde_bp
 from routes.stations import stations_bp
 from routes.datasets import datasets_bp
@@ -53,6 +54,9 @@ weather_stations = db["weather_stations"]
 datasets = db["datasets"]
 weather_records = db["weather_records"]
 missions = db["missions"]
+launches = db["launches"]
+initial_surface_data = db["initial_surface_data"]
+live_telemetry = db["live_telemetry"]
 
 users.create_index("email", unique=True)
 user_profiles.create_index("userId", unique=True)
@@ -70,6 +74,12 @@ weather_records.create_index([("stationId", 1), ("date", 1), ("time", 1)])
 weather_records.create_index([("stationId", 1), ("date", 1), ("time", 1), ("serial", 1)])
 missions.create_index("missionId", unique=True)
 missions.create_index([("userId", 1), ("createdAt", -1)])
+launches.create_index([("userId", 1), ("createdAt", -1)])
+launches.create_index([("userId", 1), ("status", 1), ("createdAt", -1)])
+launches.create_index([("balloonId", 1), ("radiosondeId", 1)])
+initial_surface_data.create_index("launchId", unique=True)
+live_telemetry.create_index([("launchId", 1), ("timestamp", -1)])
+live_telemetry.create_index([("launchId", 1), ("source", 1)])
 
 PROFILE_ROLES = {
     "student",
@@ -415,6 +425,7 @@ app.register_blueprint(datasets_bp)
 app.register_blueprint(analytics_bp)
 app.register_blueprint(data_quality_bp)
 app.register_blueprint(missions_bp)
+app.register_blueprint(launches_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(weather_bp)
 app.register_blueprint(atmosphere_bp)

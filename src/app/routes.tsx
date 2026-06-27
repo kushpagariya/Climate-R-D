@@ -5,6 +5,7 @@ import { Root } from "./pages/root";
 import { AtmosphericDashboard } from "./pages/atmospheric-dashboard";
 import { MissionControl } from "./pages/mission-control";
 import { MissionHistoryPage } from "./pages/mission-history";
+import { LiveTrackingPage } from "./pages/live-tracking";
 import { ProfilePage } from "./pages/profile";
 import { SettingsPage } from "./pages/settings";
 import { LoginPage } from "./pages/login";
@@ -45,6 +46,7 @@ export const router = createBrowserRouter([
               { index: true, Component: AtmosphericDashboard },
               { path: "mission-control", Component: MissionControl },
               { path: "mission-history", Component: MissionHistoryPage },
+              { path: "live-tracking", Component: LiveTrackingPage },
               { path: "profile", Component: ProfilePage },
               { path: "settings", Component: SettingsPage },
             ],

@@ -2,8 +2,10 @@ import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import {
   Cloud,
   Database,
+  GitCompare,
   History,
   LogOut,
+  MapPinned,
   Radar,
   Settings,
   UserCircle,
@@ -22,6 +24,11 @@ import {
 const navItems = [
   { to: "/", label: "Dashboard", icon: Cloud },
   { to: "/mission-control", label: "Mission Control", icon: Radar },
+  { to: "/mission-history", label: "Historical Analysis", icon: History },
+  { to: "/?compare=true", label: "Compare Soundings", icon: GitCompare },
+  { to: "/pre-launch", label: "Pre-Launch Setup", icon: Database },
+  { to: "/live-tracking", label: "Live Tracking", icon: MapPinned },
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 function formatRole(role?: string) {
@@ -84,7 +91,9 @@ export function Root() {
             <div className="flex flex-wrap items-center gap-2">
               {navItems.map((item) => {
                 const Icon = item.icon;
-                const active = location.pathname === item.to;
+                const active = item.to.includes("?")
+                  ? `${location.pathname}${location.search}` === item.to
+                  : location.pathname === item.to;
 
                 return (
                   <Link
