@@ -8,6 +8,8 @@ from auth_utils import log_activity, require_auth, utc_now
 
 launches_bp = Blueprint("launches", __name__)
 
+import re
+
 REQUIRED_CSV_COLUMNS = {
     "pressure_hPa",
     "geopotential_height_m",
@@ -21,7 +23,25 @@ REQUIRED_CSV_COLUMNS = {
     "altitude_m",
 }
 
+CSV_ALIASES = {
+    "pressure_hPa": ["Pressure(hPa)", "Pressure", "pressure", "PRESSURE", "pressure hpa"],
+    "geopotential_height_m": ["Height(m)", "Height", "Geopotential Height", "Altitude"],
+    "temperature_C": ["Temp(°C)", "Temperature", "Temp", "Air Temperature"],
+    "dew_point_temperature_C": ["DewPt(°C)", "Dew Point", "DewPoint"],
+    "relative_humidity_%": ["RH(%)", "RH", "Humidity", "Relative Humidity"],
+    "wind_speed_m_s": ["Wind(m/s)", "Wind Speed", "WindSpeed"],
+    "wind_direction_degree": ["Dir(°)", "Direction", "Wind Direction"],
+    "latitude": ["Latitude", "Lat"],
+    "longitude": ["Longitude", "Lon", "Lng"],
+    "altitude_m": ["Altitude", "Altitude(m)"]
+}
+
 LAUNCH_STATUSES = {"draft", "ready", "live", "completed", "cancelled"}
+
+def _normalize_column_name(col):
+    c = str(col).lower()
+    c = re.sub(r'[\s_\-\(\)°%]', '', c)
+    return c
 
 
 def _isoformat(value):
@@ -155,9 +175,27 @@ def _launch_query(launch_id):
 def _row_to_telemetry(launch_id, row, index):
     if not isinstance(row, dict):
         raise ValueError(f"Row {index + 1} must be an object.")
+        
+    # Alias mapping layer
+    mapped_row = {}
+    for k, v in row.items():
+        norm_k = _normalize_column_name(k)
+        mapped_key = k
+        for canon, aliases in CSV_ALIASES.items():
+            valid_norms = [_normalize_column_name(a) for a in aliases] + [_normalize_column_name(canon)]
+            if norm_k in valid_norms:
+                mapped_key = canon
+                break
+        mapped_row[mapped_key] = v
+        
+    row = mapped_row
+
     missing = sorted(REQUIRED_CSV_COLUMNS - set(row.keys()))
     if missing:
-        raise ValueError(f"Missing CSV column: {missing[0]}.")
+        canon = missing[0]
+        aliases = CSV_ALIASES.get(canon, [])
+        aliases_str = ", ".join(aliases)
+        raise ValueError(f"Missing required column:\n{canon}\n\nAccepted aliases:\n{aliases_str}")
 
     return {
         "launchId": launch_id,

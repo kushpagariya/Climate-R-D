@@ -2,6 +2,24 @@ import math
 from datetime import datetime, timezone
 import pandas as pd
 from bson import ObjectId
+import re
+
+CSV_ALIASES = {
+    "pressure": ["pressure_hpa", "pressure(hpa)", "pressure", "pressure hpa"],
+    "altitude": ["geopotential_height_m", "height(m)", "height", "geopotential height", "altitude", "altitude(m)"],
+    "temperature": ["temperature_c", "temp(°c)", "temperature", "temp", "air temperature"],
+    "dewPoint": ["dew_point_temperature_c", "dewpt(°c)", "dew point", "dewpoint"],
+    "humidity": ["relative_humidity_%", "rh(%)", "rh", "humidity", "relative humidity"],
+    "windspeed": ["wind_speed_m_s", "wind(m/s)", "wind speed", "windspeed", "wind"],
+    "winddirection": ["wind_direction_degree", "dir(°)", "direction", "wind direction", "winddirection"],
+    "latitude": ["latitude", "lat"],
+    "longitude": ["longitude", "lon", "lng"]
+}
+
+def _normalize_column_name(col):
+    c = str(col).lower()
+    c = re.sub(r'[\s_\-\(\)°%]', '', c)
+    return c
 
 VALIDATION_RULES = {
     "temperature": {"min": -100, "max": 60},
@@ -36,6 +54,21 @@ def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch
         raise ValueError("Unsupported file format")
 
     for chunk_df in iterator:
+        # Alias mapping layer for chunk columns
+        mapped_columns = []
+        for col in chunk_df.columns:
+            norm_col = _normalize_column_name(col)
+            mapped_key = col
+            for internal_name, aliases in CSV_ALIASES.items():
+                valid_norms = [_normalize_column_name(a) for a in aliases] + [_normalize_column_name(internal_name)]
+                if norm_col in valid_norms:
+                    mapped_key = internal_name
+                    break
+            mapped_columns.append(mapped_key)
+            
+        chunk_df.columns = mapped_columns
+        
+        # Now lowercased strings
         chunk_df.columns = [str(c).strip().lower() for c in chunk_df.columns]
         
         if "date" not in chunk_df.columns:
