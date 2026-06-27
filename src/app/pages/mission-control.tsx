@@ -13,6 +13,7 @@ import {
   Clock,
   TrendingUp,
   Maximize2,
+  Minimize2,
   AlertTriangle,
   Info,
   Pause,
@@ -40,6 +41,7 @@ export function MissionControl() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [replayIndex, setReplayIndex] = useState(0);
   const [replaySpeed, setReplaySpeed] = useState<ReplaySpeed>(1);
+  const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const mapCardRef = useRef<HTMLDivElement>(null);
   const station = STATIONS[0];
   const { session } = useAuth();
@@ -152,6 +154,29 @@ export function MissionControl() {
     setIsPlaying(false);
     setIsLive(true);
   };
+
+  const toggleMapFullscreen = async () => {
+    const mapCard = mapCardRef.current;
+    if (!mapCard) return;
+
+    if (document.fullscreenElement === mapCard) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await mapCard.requestFullscreen();
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsMapFullscreen(document.fullscreenElement === mapCardRef.current);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
   
   // Current observation based on altitude
   const currentObs = observations.reduce(
@@ -331,12 +356,15 @@ export function MissionControl() {
                   </div>
 
                   <button
-                    onClick={() => {
-                      mapCardRef.current?.requestFullscreen();
-                    }}
+                    onClick={toggleMapFullscreen}
                     className="p-2 rounded-lg hover:bg-white/10 transition"
+                    title={isMapFullscreen ? "Exit fullscreen" : "Fullscreen"}
                   >
-                    <Maximize2 className="w-5 h-5 text-muted-foreground hover:text-foreground" />
+                    {isMapFullscreen ? (
+                      <Minimize2 className="w-5 h-5 text-muted-foreground hover:text-foreground" />
+                    ) : (
+                      <Maximize2 className="w-5 h-5 text-muted-foreground hover:text-foreground" />
+                    )}
                   </button>
                 </div>
 

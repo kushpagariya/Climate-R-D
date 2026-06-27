@@ -187,6 +187,7 @@ export function AtmosphericDashboard() {
   const queryStation = searchParams.get("station");
   const queryDate = searchParams.get("date");
   const queryTime = searchParams.get("time");
+  const queryCompare = searchParams.get("compare");
   const initialStation = STATIONS.some((station) => station.id === queryStation)
     ? queryStation!
     : STATIONS[0].id;
@@ -196,7 +197,7 @@ export function AtmosphericDashboard() {
   const [selectedDate, setSelectedDate] = useState(queryDate || today);
   const [selectedTime, setSelectedTime] = useState<TimeSlot>(initialTime);
 
-  const [compareOpen, setCompareOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(queryCompare === "true");
   const [comparePanelData, setComparePanelData] = useState<RadiosondeObservation[] | undefined>(undefined);
 
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -224,7 +225,12 @@ export function AtmosphericDashboard() {
     if (queryTime === "00:00" || queryTime === "12:00") {
       setSelectedTime(queryTime);
     }
-  }, [queryDate, queryStation, queryTime]);
+    if (queryCompare === "true") {
+      setCompareOpen(true);
+      setHistoryOpen(false);
+      setActiveHistoryId(null);
+    }
+  }, [queryCompare, queryDate, queryStation, queryTime]);
 
   useEffect(() => {
     let cancelled = false;
