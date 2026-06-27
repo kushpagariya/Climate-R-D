@@ -66,13 +66,14 @@ def upload_dataset():
     dataset_id = result.inserted_id
 
     try:
-        records, missing_report, dup_report, stats = process_weather_dataset(
-            file, file_ext, station_id, str(dataset_id)
-        )
-
         weather_records_col = g.db["weather_records"]
-        if records:
-            weather_records_col.insert_many(records, ordered=False)
+        def insert_batch(batch):
+            if batch:
+                weather_records_col.insert_many(batch, ordered=False)
+
+        missing_report, dup_report, invalid_report, stats = process_weather_dataset(
+            file, file_ext, station_id, str(dataset_id), batch_callback=insert_batch
+        )
 
         datasets_col.update_one(
             {"_id": dataset_id},
@@ -82,6 +83,7 @@ def upload_dataset():
                     "stats": stats,
                     "missingReport": missing_report,
                     "duplicateReport": dup_report,
+                    "invalidReport": invalid_report,
                 }
             },
         )

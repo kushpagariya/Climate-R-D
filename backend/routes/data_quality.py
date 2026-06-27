@@ -47,3 +47,13 @@ def get_duplicates(dataset_id):
         return error_response
 
     return jsonify({"success": True, "duplicateReport": dataset.get("duplicateReport", [])})
+
+
+@data_quality_bp.route("/invalid/<dataset_id>", methods=["GET"])
+@require_auth
+def get_invalid(dataset_id):
+    dataset, error_response = _get_owned_dataset(dataset_id)
+    if error_response:
+        return error_response
+
+    return jsonify({"success": True, "invalidReport": dataset.get("invalidReport", [])})

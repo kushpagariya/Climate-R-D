@@ -1,108 +1,168 @@
 import math
 from datetime import datetime, timezone
-
 import pandas as pd
 from bson import ObjectId
 
+VALIDATION_RULES = {
+    "temperature": {"min": -100, "max": 60},
+    "pressure": {"min": 0, "max": 1100},
+    "humidity": {"min": 0, "max": 100},
+    "windSpeed": {"min": 0, "max": 150},
+    "windDirection": {"min": 0, "max": 360},
+    "latitude": {"min": -90, "max": 90},
+    "longitude": {"min": -180, "max": 180},
+    "altitude": {"min": -500, "max": 50000},
+}
 
-def process_weather_dataset(file_path, file_ext, station_id, dataset_id):
+def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch_callback=None, chunk_size=10000):
     """
-    Parses a CSV/XLSX file, validates it, and returns records to insert, along with quality stats.
+    Parses a CSV/XLSX file in chunks, validates it against meteorological bounds, 
+    triggers batch inserts via callback, and returns quality reports.
     """
+    missing_records_report = []
+    duplicate_records_report = []
+    invalid_records_report = []
+    
+    total_rows = 0
+    inserted_rows = 0
+    seen_datetime = set()
+    
     if file_ext == "csv":
-        df = pd.read_csv(file_path)
+        iterator = pd.read_csv(file_object, chunksize=chunk_size)
     elif file_ext in ["xls", "xlsx"]:
-        df = pd.read_excel(file_path)
+        df = pd.read_excel(file_object)
+        iterator = [df[i:i+chunk_size] for i in range(0, df.shape[0], chunk_size)]
     else:
         raise ValueError("Unsupported file format")
 
-    df.columns = [str(c).strip().lower() for c in df.columns]
+    for chunk_df in iterator:
+        chunk_df.columns = [str(c).strip().lower() for c in chunk_df.columns]
+        
+        if "date" not in chunk_df.columns:
+            raise ValueError("Dataset must contain a 'date' column")
 
-    if "date" not in df.columns:
-        raise ValueError("Dataset must contain a 'date' column")
-
-    records = []
-    missing_records_report = []
-    duplicate_records_report = []
-
-    total_rows = len(df)
-    seen_datetime = set()
-
-    for index, row in df.iterrows():
-        try:
-            date_val = str(row["date"]).strip()
+        batch_records = []
+        
+        for index, row in chunk_df.iterrows():
+            total_rows += 1
+            row_num = total_rows + 1
             
-            missing_fields = []
+            try:
+                date_val = str(row["date"]).strip()
+                if not date_val or date_val.lower() == "nan":
+                    invalid_records_report.append({"row": row_num, "reason": "Missing date"})
+                    continue
+                
+                try:
+                    pd.to_datetime(date_val)
+                except ValueError:
+                    invalid_records_report.append({"row": row_num, "date": date_val, "reason": "Invalid date format"})
+                    continue
+                    
+                missing_fields = []
+                invalid_fields = []
 
-            record = {
-                "stationId": str(station_id),
-                "datasetId": str(dataset_id),
-                "date": date_val,
-                "createdAt": datetime.now(timezone.utc),
-            }
+                record = {
+                    "stationId": str(station_id),
+                    "datasetId": str(dataset_id),
+                    "date": date_val,
+                    "createdAt": datetime.now(timezone.utc),
+                }
 
-            time_val = str(row.get("time", "")).strip()
-            if time_val and time_val != "nan":
-                record["time"] = time_val
-                dt_key = f"{date_val}_{time_val}"
-            else:
-                dt_key = date_val
+                time_val = str(row.get("time", "")).strip()
+                if time_val and time_val.lower() != "nan":
+                    record["time"] = time_val
+                    dt_key = f"{date_val}_{time_val}"
+                else:
+                    dt_key = date_val
 
-            if dt_key in seen_datetime:
-                duplicate_records_report.append(
-                    {
-                        "row": index + 2,
+                if dt_key in seen_datetime:
+                    duplicate_records_report.append({
+                        "row": row_num,
                         "date": date_val,
                         "time": time_val,
-                    }
-                )
-                continue
+                    })
+                    continue
+                    
+                seen_datetime.add(dt_key)
+
+                def get_val(field):
+                    val = row.get(field)
+                    if pd.isna(val):
+                        missing_fields.append(field)
+                        return None
+                    try:
+                        return float(val)
+                    except (ValueError, TypeError):
+                        invalid_fields.append(f"{field} (not numeric)")
+                        return None
+
+                def validate_and_set(internal_field, csv_field=None):
+                    if csv_field is None:
+                        csv_field = internal_field
+                    
+                    val = get_val(csv_field)
+                    if val is not None:
+                        rules = VALIDATION_RULES.get(internal_field)
+                        if rules:
+                            if val < rules["min"] or val > rules["max"]:
+                                invalid_fields.append(f"{internal_field} ({val} out of bounds)")
+                                return
+                        record[internal_field] = val
+
+                validate_and_set("temperature")
+                validate_and_set("pressure")
+                validate_and_set("humidity")
                 
-            seen_datetime.add(dt_key)
+                wind_speed = get_val("windspeed")
+                if wind_speed is None:
+                    wind_speed = get_val("wind_speed")
+                if wind_speed is not None:
+                    rules = VALIDATION_RULES["windSpeed"]
+                    if wind_speed < rules["min"] or wind_speed > rules["max"]:
+                        invalid_fields.append(f"windSpeed ({wind_speed} out of bounds)")
+                    else:
+                        record["windSpeed"] = wind_speed
 
-            def get_val(field):
-                val = row.get(field)
-                if pd.isna(val):
-                    missing_fields.append(field)
-                    return None
-                return float(val)
+                validate_and_set("windDirection", "wind_direction")
+                if "winddirection" in chunk_df.columns and "windDirection" not in record:
+                    validate_and_set("windDirection", "winddirection")
 
-            temp = get_val("temperature")
-            if temp is not None:
-                record["temperature"] = temp
+                validate_and_set("latitude")
+                validate_and_set("longitude")
+                validate_and_set("altitude")
+                
+                if invalid_fields:
+                    invalid_records_report.append({
+                        "row": row_num,
+                        "date": date_val,
+                        "invalid": invalid_fields
+                    })
+                    continue
 
-            pressure = get_val("pressure")
-            if pressure is not None:
-                record["pressure"] = pressure
-
-            humidity = get_val("humidity")
-            if humidity is not None:
-                record["humidity"] = humidity
-
-            wind_speed = get_val("windspeed")
-            if wind_speed is None:
-                wind_speed = get_val("wind_speed")
-            if wind_speed is not None:
-                record["windSpeed"] = wind_speed
-
-            if missing_fields:
-                missing_records_report.append(
-                    {
-                        "row": index + 2,
+                if missing_fields:
+                    missing_records_report.append({
+                        "row": row_num,
                         "date": date_val,
                         "missing": missing_fields,
-                    }
-                )
+                    })
 
-            records.append(record)
-        except Exception as e:
-            continue
-
+                batch_records.append(record)
+                inserted_rows += 1
+                
+            except Exception as e:
+                invalid_records_report.append({"row": row_num, "reason": f"Processing error: {str(e)}"})
+                continue
+                
+        if batch_records and batch_callback:
+            batch_callback(batch_records)
+            
     stats = {
         "totalRows": total_rows,
-        "insertedRows": len(records),
+        "insertedRows": inserted_rows,
         "missingCount": len(missing_records_report),
         "duplicateCount": len(duplicate_records_report),
+        "invalidCount": len(invalid_records_report),
     }
 
-    return records, missing_records_report, duplicate_records_report, stats
+    return missing_records_report, duplicate_records_report, invalid_records_report, stats
