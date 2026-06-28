@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -25,7 +25,7 @@ REQUIRED_CSV_COLUMNS = {
 
 CSV_ALIASES = {
     "pressure_hPa": ["Pressure(hPa)", "Pressure", "pressure", "PRESSURE", "pressure hpa"],
-    "geopotential_height_m": ["Height(m)", "Height", "Geopotential Height", "Altitude"],
+    "geopotential_height_m": ["Height(m)", "Height", "Geopotential Height", "Geopot"],
     "temperature_C": ["Temp(°C)", "Temperature", "Temp", "Air Temperature"],
     "dew_point_temperature_C": ["DewPt(°C)", "Dew Point", "DewPoint"],
     "relative_humidity_%": ["RH(%)", "RH", "Humidity", "Relative Humidity"],
@@ -33,10 +33,13 @@ CSV_ALIASES = {
     "wind_direction_degree": ["Dir(°)", "Direction", "Wind Direction"],
     "latitude": ["Latitude", "Lat"],
     "longitude": ["Longitude", "Lon", "Lng"],
-    "altitude_m": ["Altitude", "Altitude(m)"]
+    "altitude_m": ["Altitude", "Altitude(m)", "Alt"],
+    "seconds_from_launch": ["Time", "Second", "Seconds", "seconds_from_launch", "sec"],
 }
 
 LAUNCH_STATUSES = {"draft", "ready", "live", "completed", "cancelled"}
+DEFAULT_TELEMETRY_LIMIT = 100
+MAX_TELEMETRY_LIMIT = 500
 
 def _normalize_column_name(col):
     c = str(col).lower()
@@ -103,6 +106,74 @@ def _parse_timestamp(value):
     return parsed.astimezone(timezone.utc)
 
 
+def _parse_optional_timestamp(value, label="timestamp"):
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be an ISO 8601 string.")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{label} must be an ISO 8601 string.") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _parse_limit(value):
+    if value in (None, ""):
+        return DEFAULT_TELEMETRY_LIMIT
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("limit must be an integer.")
+    if parsed <= 0:
+        raise ValueError("limit must be greater than zero.")
+    return min(parsed, MAX_TELEMETRY_LIMIT)
+
+
+def _parse_after_second(value):
+    if value in (None, ""):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("afterSecond must be a number.")
+    if not parsed == parsed:
+        raise ValueError("afterSecond must be a number.")
+    return parsed
+
+
+def _parse_launch_datetime(launch, metadata=None):
+    launch_date = (metadata or {}).get("launchDate") or launch.get("launchDate")
+    launch_time = (metadata or {}).get("launchTime") or launch.get("launchTime")
+    if not launch_date or not launch_time:
+        return utc_now()
+
+    try:
+        parsed_date = datetime.strptime(launch_date, "%Y-%m-%d").date()
+        parsed_time = datetime.strptime(launch_time[:5], "%H:%M").time()
+    except (TypeError, ValueError):
+        return utc_now()
+
+    return datetime.combine(parsed_date, parsed_time, tzinfo=timezone.utc)
+
+
+def _row_second(row, index):
+    value = row.get("seconds_from_launch")
+    if value in (None, ""):
+        return index
+    if isinstance(value, bool):
+        return index
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return index
+    if not parsed == parsed:
+        return index
+    return int(round(parsed))
+
+
 def _validate_launch_payload(data):
     if not isinstance(data, dict):
         raise ValueError("Request body must be a JSON object.")
@@ -113,6 +184,8 @@ def _validate_launch_payload(data):
         "launchTime": _as_string(data, "launchTime", max_length=20),
         "balloonId": _as_string(data, "balloonId", max_length=100),
         "radiosondeId": _as_string(data, "radiosondeId", max_length=100),
+        "sondeNumber": _as_string(data, "sondeNumber", required=False, max_length=100),
+        "sourceFileName": _as_string(data, "sourceFileName", required=False, max_length=180),
         "operator": _as_string(data, "operator", required=False),
         "status": data.get("status") or "draft",
     }
@@ -147,6 +220,8 @@ def _serialize_launch(doc, surface=None):
         "launchTime": doc.get("launchTime"),
         "balloonId": doc.get("balloonId"),
         "radiosondeId": doc.get("radiosondeId"),
+        "sondeNumber": doc.get("sondeNumber"),
+        "sourceFileName": doc.get("sourceFileName"),
         "operator": doc.get("operator"),
         "status": doc.get("status", "draft"),
         "createdAt": _isoformat(doc.get("createdAt")),
@@ -172,7 +247,7 @@ def _launch_query(launch_id):
     return {"_id": _parse_object_id(launch_id, "launch id"), "userId": g.user["_id"]}
 
 
-def _row_to_telemetry(launch_id, row, index):
+def _row_to_telemetry(launch_id, row, index, base_timestamp=None, source="csv"):
     if not isinstance(row, dict):
         raise ValueError(f"Row {index + 1} must be an object.")
         
@@ -197,9 +272,13 @@ def _row_to_telemetry(launch_id, row, index):
         aliases_str = ", ".join(aliases)
         raise ValueError(f"Missing required column:\n{canon}\n\nAccepted aliases:\n{aliases_str}")
 
+    second = _row_second(row, index)
+    timestamp = (base_timestamp or utc_now()) + timedelta(seconds=second)
+
     return {
         "launchId": launch_id,
-        "timestamp": utc_now(),
+        "second": second,
+        "timestamp": timestamp,
         "pressure": _as_number(row, "pressure_hPa"),
         "temperature": _as_number(row, "temperature_C"),
         "humidity": _as_number(row, "relative_humidity_%"),
@@ -209,9 +288,49 @@ def _row_to_telemetry(launch_id, row, index):
         "windSpeed": _as_number(row, "wind_speed_m_s"),
         "windDirection": _as_number(row, "wind_direction_degree"),
         "geopotentialHeight": _as_number(row, "geopotential_height_m"),
+        "geopotential": _as_number(row, "geopotential_height_m"),
         "dewPoint": _as_number(row, "dew_point_temperature_C"),
-        "source": "csv",
+        "source": source,
     }
+
+
+def _serialize_telemetry(doc):
+    return {
+        "id": str(doc.get("_id")),
+        "launchId": str(doc.get("launchId")),
+        "second": doc.get("second"),
+        "timestamp": _isoformat(doc.get("timestamp")),
+        "pressure": doc.get("pressure"),
+        "temperature": doc.get("temperature"),
+        "humidity": doc.get("humidity"),
+        "latitude": doc.get("latitude"),
+        "longitude": doc.get("longitude"),
+        "altitude": doc.get("altitude"),
+        "windSpeed": doc.get("windSpeed"),
+        "windDirection": doc.get("windDirection"),
+        "geopotential": doc.get("geopotential"),
+        "geopotentialHeight": doc.get("geopotentialHeight"),
+        "dewPoint": doc.get("dewPoint"),
+        "source": doc.get("source"),
+        "createdAt": _isoformat(doc.get("createdAt")),
+    }
+
+
+def _build_telemetry_cursor_query(launch_id, after_second=None, after_timestamp=None):
+    filters = [{"launchId": launch_id}]
+    if after_second is not None:
+        filters.append({"second": {"$gt": after_second}})
+    if after_timestamp is not None:
+        filters.append({"timestamp": {"$gt": after_timestamp}})
+    if len(filters) == 1:
+        return filters[0]
+    return {"$and": filters}
+
+
+def _telemetry_collection_for_launch(launch_id):
+    if g.db["telemetry"].find_one({"launchId": launch_id}, {"_id": 1}):
+        return "telemetry"
+    return "live_telemetry"
 
 
 def _surface_from_csv_row(launch_id, row):
@@ -298,9 +417,20 @@ def upload_launch_csv(launch_id):
     rows = data.get("rows")
     if not isinstance(rows, list) or not rows:
         return jsonify({"success": False, "error": "rows must be a non-empty array."}), 400
+    metadata = data.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        return jsonify({"success": False, "error": "metadata must be a JSON object."}), 400
+    source = metadata.get("sourceFormat") or "csv"
+    if not isinstance(source, str) or source.lower() not in {"csv", "txt", "dat"}:
+        source = "csv"
+    source = source.lower()
 
     try:
-        telemetry_docs = [_row_to_telemetry(launch["_id"], row, index) for index, row in enumerate(rows)]
+        base_timestamp = _parse_launch_datetime(launch, metadata)
+        telemetry_docs = [
+            _row_to_telemetry(launch["_id"], row, index, base_timestamp=base_timestamp, source=source)
+            for index, row in enumerate(rows)
+        ]
         surface_doc = _surface_from_csv_row(launch["_id"], rows[0])
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -309,17 +439,25 @@ def upload_launch_csv(launch_id):
     for doc in telemetry_docs:
         doc["createdAt"] = now
 
-    g.db["live_telemetry"].delete_many({"launchId": launch["_id"], "source": "csv"})
+    g.db["live_telemetry"].delete_many({"launchId": launch["_id"], "source": {"$in": ["csv", "txt", "dat"]}})
     g.db["live_telemetry"].insert_many(telemetry_docs)
+    g.db["telemetry"].delete_many({"launchId": launch["_id"], "source": {"$in": ["csv", "txt", "dat"]}})
+    g.db["telemetry"].insert_many([dict(doc) for doc in telemetry_docs])
     g.db["initial_surface_data"].update_one(
         {"launchId": launch["_id"]},
         {"$set": {**surface_doc, "updatedAt": now}, "$setOnInsert": {"createdAt": now}},
         upsert=True,
     )
-    g.db["launches"].update_one(
-        {"_id": launch["_id"]},
-        {"$set": {"status": "ready", "updatedAt": now}},
-    )
+    launch_updates = {
+        "status": "ready",
+        "updatedAt": now,
+        "telemetrySource": source,
+    }
+    if data.get("fileName"):
+        launch_updates["sourceFileName"] = str(data.get("fileName"))[:180]
+    if metadata.get("sondeNumber"):
+        launch_updates["sondeNumber"] = str(metadata.get("sondeNumber"))[:100]
+    g.db["launches"].update_one({"_id": launch["_id"]}, {"$set": launch_updates})
 
     log_activity(
         "upload_launch_csv",
@@ -335,6 +473,93 @@ def upload_launch_csv(launch_id):
             "status": "ready",
         }
     )
+
+
+@launches_bp.route("/launches/<launch_id>/telemetry", methods=["GET"])
+@require_auth
+def get_launch_telemetry(launch_id):
+    try:
+        query = _launch_query(launch_id)
+        after_second = _parse_after_second(request.args.get("afterSecond"))
+        after_timestamp = _parse_optional_timestamp(request.args.get("afterTimestamp"), "afterTimestamp")
+        limit = _parse_limit(request.args.get("limit"))
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+    launch = g.db["launches"].find_one(query)
+    if not launch:
+        return jsonify({"success": False, "error": "Launch not found."}), 404
+
+    collection_name = _telemetry_collection_for_launch(launch["_id"])
+    telemetry_query = _build_telemetry_cursor_query(
+        launch["_id"],
+        after_second=after_second,
+        after_timestamp=after_timestamp,
+    )
+    docs = list(
+        g.db[collection_name]
+        .find(telemetry_query)
+        .sort([("second", 1), ("timestamp", 1), ("_id", 1)])
+        .limit(limit)
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "telemetry": [_serialize_telemetry(doc) for doc in docs],
+            "count": len(docs),
+            "limit": limit,
+            "sourceCollection": collection_name,
+            "hasMore": len(docs) == limit,
+        }
+    )
+
+
+@launches_bp.route("/launches/<launch_id>/telemetry", methods=["POST"])
+@require_auth
+def create_launch_telemetry(launch_id):
+    try:
+        query = _launch_query(launch_id)
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+    launch = g.db["launches"].find_one(query)
+    if not launch:
+        return jsonify({"success": False, "error": "Launch not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    try:
+        telemetry = {
+            "launchId": launch["_id"],
+            "second": _as_number(data, "second"),
+            "timestamp": _parse_timestamp(data.get("timestamp")),
+            "pressure": _as_number(data, "pressure"),
+            "temperature": _as_number(data, "temperature"),
+            "humidity": _as_number(data, "humidity"),
+            "latitude": _as_number(data, "latitude"),
+            "longitude": _as_number(data, "longitude"),
+            "altitude": _as_number(data, "altitude"),
+            "windSpeed": _as_number(data, "windSpeed"),
+            "windDirection": _as_number(data, "windDirection"),
+            "geopotential": _as_number(data, "geopotential"),
+            "geopotentialHeight": _as_number(data, "geopotentialHeight"),
+            "dewPoint": _as_number(data, "dewPoint"),
+            "source": _as_string(data, "source", required=False, max_length=40) or "manual",
+            "createdAt": utc_now(),
+        }
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+    live_result = g.db["live_telemetry"].insert_one(dict(telemetry))
+    telemetry_result = g.db["telemetry"].insert_one({**telemetry, "_id": ObjectId()})
+    log_activity(
+        "ingest_launch_telemetry",
+        "launch",
+        str(launch["_id"]),
+        {"telemetryId": str(telemetry_result.inserted_id), "liveTelemetryId": str(live_result.inserted_id)},
+    )
+    telemetry["_id"] = telemetry_result.inserted_id
+    return jsonify({"success": True, "telemetry": _serialize_telemetry(telemetry)}), 201
 
 
 @launches_bp.route("/launches/<launch_id>/start", methods=["POST"])
@@ -376,6 +601,7 @@ def create_live_telemetry():
     try:
         telemetry = {
             "launchId": launch_id,
+            "second": _as_number(data, "second"),
             "timestamp": _parse_timestamp(data.get("timestamp")),
             "pressure": _as_number(data, "pressure"),
             "temperature": _as_number(data, "temperature"),
@@ -385,6 +611,9 @@ def create_live_telemetry():
             "altitude": _as_number(data, "altitude"),
             "windSpeed": _as_number(data, "windSpeed"),
             "windDirection": _as_number(data, "windDirection"),
+            "geopotential": _as_number(data, "geopotential"),
+            "geopotentialHeight": _as_number(data, "geopotential"),
+            "dewPoint": _as_number(data, "dewPoint"),
             "source": _as_string(data, "source", required=False, max_length=40) or "manual",
             "createdAt": utc_now(),
         }
@@ -392,5 +621,6 @@ def create_live_telemetry():
         return jsonify({"success": False, "error": str(exc)}), 400
 
     result = g.db["live_telemetry"].insert_one(telemetry)
+    g.db["telemetry"].insert_one({**telemetry, "_id": ObjectId()})
     log_activity("ingest_telemetry", "launch", str(launch_id), {"telemetryId": str(result.inserted_id)})
     return jsonify({"success": True, "id": str(result.inserted_id)}), 201

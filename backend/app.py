@@ -57,6 +57,7 @@ missions = db["missions"]
 launches = db["launches"]
 initial_surface_data = db["initial_surface_data"]
 live_telemetry = db["live_telemetry"]
+telemetry = db["telemetry"]
 
 users.create_index("email", unique=True)
 user_profiles.create_index("userId", unique=True)
@@ -80,6 +81,9 @@ launches.create_index([("balloonId", 1), ("radiosondeId", 1)])
 initial_surface_data.create_index("launchId", unique=True)
 live_telemetry.create_index([("launchId", 1), ("timestamp", -1)])
 live_telemetry.create_index([("launchId", 1), ("source", 1)])
+live_telemetry.create_index([("launchId", 1), ("second", 1)])
+telemetry.create_index([("launchId", 1), ("timestamp", 1)])
+telemetry.create_index([("launchId", 1), ("second", 1)])
 
 PROFILE_ROLES = {
     "student",

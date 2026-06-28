@@ -31,10 +31,7 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import {
-  generateRadiosondeProfile,
-  generateBalloonHistory,
   calculateAtmosphericParameters,
-  STATIONS,
   type RadiosondeObservation,
   type BalloonRecord,
 } from "../data/radiosonde-data";
@@ -53,16 +50,11 @@ import { createGraphHistoryApi, getGraphHistoryApi } from "../api/history";
 import { createSavedAnalysisApi, getSavedAnalysesApi } from "../api/analysis";
 import { createFavoriteApi, getFavoritesApi } from "../api/favorites";
 import { logActivityApi } from "../api/activity";
-import {
-  fetchRadiosondeHistoryRecords,
-  fetchRadiosondeProfile,
-  fetchHistoryOverlayProfile,
-  saveRadiosondeApi,
-  type AxisLimits,
-} from "../api/radiosonde";
+import { saveRadiosondeApi, type AxisLimits, type RadiosondeParameters } from "../api/radiosonde";
+import { getDashboardSoundingApi, type DashboardLaunchOption } from "../api/dashboard";
 import { useSearchParams } from "react-router";
 
-type TimeSlot = "00:00" | "12:00";
+type TimeSlot = string;
 
 function KpiCard({
   icon,
@@ -189,14 +181,15 @@ export function AtmosphericDashboard() {
   const queryDate = searchParams.get("date");
   const queryTime = searchParams.get("time");
   const queryCompare = searchParams.get("compare");
-  const initialStation = STATIONS.some((station) => station.id === queryStation)
-    ? queryStation!
-    : STATIONS[0].id;
-  const initialTime = queryTime === "12:00" ? "12:00" : "00:00";
+  const initialTime = queryTime || "";
 
-  const [selectedStation, setSelectedStation] = useState(initialStation);
-  const [selectedDate, setSelectedDate] = useState(queryDate || today);
+  const [selectedStation, setSelectedStation] = useState(queryStation || "");
+  const [selectedDate, setSelectedDate] = useState(queryDate || "");
   const [selectedTime, setSelectedTime] = useState<TimeSlot>(initialTime);
+  const [availableLaunches, setAvailableLaunches] = useState<DashboardLaunchOption[]>([]);
+  const [dashboardMessage, setDashboardMessage] = useState<string | null>(null);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [serverParams, setServerParams] = useState<RadiosondeParameters | null>(null);
 
   const [compareOpen, setCompareOpen] = useState(queryCompare === "true");
   const [comparePanelData, setComparePanelData] = useState<RadiosondeObservation[] | undefined>(undefined);
@@ -208,23 +201,19 @@ export function AtmosphericDashboard() {
   const lastStationRef = useRef(selectedStation);
   const lastDateRef = useRef(selectedDate);
 
-  const [data, setData] = useState<RadiosondeObservation[]>(() =>
-    generateRadiosondeProfile(selectedDate, selectedTime, selectedStation),
-  );
+  const [data, setData] = useState<RadiosondeObservation[]>([]);
   const [axisLimits, setAxisLimits] = useState<AxisLimits | undefined>(undefined);
-  const [balloonHistory, setBalloonHistory] = useState<BalloonRecord[]>(() =>
-    generateBalloonHistory(selectedStation, 14),
-  );
+  const [balloonHistory, setBalloonHistory] = useState<BalloonRecord[]>([]);
   const [historyData, setHistoryData] = useState<RadiosondeObservation[] | undefined>(undefined);
 
   useEffect(() => {
-    if (queryStation && STATIONS.some((station) => station.id === queryStation)) {
+    if (queryStation) {
       setSelectedStation(queryStation);
     }
     if (queryDate) {
       setSelectedDate(queryDate);
     }
-    if (queryTime === "00:00" || queryTime === "12:00") {
+    if (queryTime) {
       setSelectedTime(queryTime);
     }
     if (queryCompare === "true") {
@@ -238,26 +227,47 @@ export function AtmosphericDashboard() {
     let cancelled = false;
 
     async function loadProfile() {
-      const result = await fetchRadiosondeProfile(
-        session?.token,
-        selectedStation,
-        selectedDate,
-        selectedTime,
-      );
-      if (cancelled) return;
+      if (!session?.token) {
+        setData([]);
+        setAxisLimits(undefined);
+        setDashboardMessage("Sign in to load launch telemetry.");
+        return;
+      }
 
-      setData(result.profile);
-      setAxisLimits(result.axisLimits);
-
-      if (result.source === "mock" && session?.token) {
-        void saveRadiosondeApi(session.token, {
-          stationId: selectedStation,
-          date: selectedDate,
-          time: selectedTime,
-          observations: result.profile,
-          source: "mock",
-          recordType: "sounding",
+      try {
+        const result = await getDashboardSoundingApi(session.token, {
+          stationId: selectedStation || undefined,
+          date: selectedDate || undefined,
+          time: selectedTime || undefined,
         });
+        if (cancelled) return;
+
+        setAvailableLaunches(result.availableLaunches || []);
+        setData(result.profile || []);
+        setAxisLimits(result.axisLimits || undefined);
+        setServerParams(result.parameters || null);
+        setDashboardMessage(result.message || null);
+        setDashboardError(null);
+
+        if (result.launch) {
+          if (!selectedStation || selectedStation !== result.launch.stationId) {
+            setSelectedStation(result.launch.stationId);
+          }
+          if (!selectedDate || selectedDate !== result.launch.date) {
+            setSelectedDate(result.launch.date);
+          }
+          if (!selectedTime || selectedTime !== result.launch.time) {
+            setSelectedTime(result.launch.time);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setData([]);
+          setAxisLimits(undefined);
+          setServerParams(null);
+          setDashboardError(err instanceof Error ? err.message : "Unable to load dashboard telemetry.");
+          setDashboardMessage(null);
+        }
       }
     }
 
@@ -268,20 +278,17 @@ export function AtmosphericDashboard() {
   }, [selectedDate, selectedStation, selectedTime, refreshKey, session?.token]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadHistory() {
-      const records = await fetchRadiosondeHistoryRecords(session?.token, selectedStation);
-      if (!cancelled) {
-        setBalloonHistory(records);
-      }
-    }
-
-    void loadHistory();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedStation, session?.token]);
+    const records = availableLaunches
+      .filter((launch) => !selectedStation || launch.stationId === selectedStation)
+      .map((launch) => ({
+        id: launch.id,
+        date: launch.date,
+        time: launch.time,
+        stationId: launch.stationId,
+        label: `${launch.date} ${launch.time}`,
+      }));
+    setBalloonHistory(records);
+  }, [availableLaunches, selectedStation]);
 
   useEffect(() => {
     if (!activeHistoryId) {
@@ -297,9 +304,20 @@ export function AtmosphericDashboard() {
     }
 
     async function loadOverlay() {
-      const profile = await fetchHistoryOverlayProfile(session?.token, record!);
-      if (!cancelled) {
-        setHistoryData(profile);
+      if (!session?.token) return;
+      try {
+        const response = await getDashboardSoundingApi(session.token, {
+          stationId: record!.stationId,
+          date: record!.date,
+          time: record!.time,
+        });
+        if (!cancelled) {
+          setHistoryData(response.profile?.length ? response.profile : undefined);
+        }
+      } catch {
+        if (!cancelled) {
+          setHistoryData(undefined);
+        }
       }
     }
 
@@ -311,7 +329,8 @@ export function AtmosphericDashboard() {
 
   const effectiveCompareData = historyData ?? comparePanelData;
 
-  const params = useMemo(() => calculateAtmosphericParameters(data), [data]);
+  const clientParams = useMemo(() => calculateAtmosphericParameters(data), [data]);
+  const params = serverParams ?? clientParams;
   const prevParams = useMemo(
     () =>
       effectiveCompareData
@@ -320,7 +339,33 @@ export function AtmosphericDashboard() {
     [effectiveCompareData]
   );
 
-  const station = STATIONS.find((s) => s.id === selectedStation) || STATIONS[0];
+  const stationOptions = useMemo(() => {
+    const byStation = new Map<string, { id: string; name: string }>();
+    availableLaunches.forEach((launch) => {
+      if (!launch.stationId) return;
+      byStation.set(launch.stationId, {
+        id: launch.stationId,
+        name: launch.stationName || launch.stationId,
+      });
+    });
+    return Array.from(byStation.values());
+  }, [availableLaunches]);
+
+  const timeOptions = useMemo(() => {
+    const values = new Set<string>();
+    availableLaunches
+      .filter((launch) => (!selectedStation || launch.stationId === selectedStation) && (!selectedDate || launch.date === selectedDate))
+      .forEach((launch) => {
+        if (launch.time) values.add(launch.time);
+      });
+    if (selectedTime) values.add(selectedTime);
+    return Array.from(values).sort();
+  }, [availableLaunches, selectedDate, selectedStation, selectedTime]);
+
+  const station = stationOptions.find((s) => s.id === selectedStation) || {
+    id: selectedStation,
+    name: selectedStation || "No launch selected",
+  };
 
   useEffect(() => {
     if (!session?.token) return;
@@ -578,10 +623,10 @@ export function AtmosphericDashboard() {
                   onValueChange={setSelectedStation}
                 >
                   <SelectTrigger className="w-[240px] bg-secondary/40 text-sm h-9">
-                    <SelectValue />
+                    <SelectValue placeholder="Select launch station" />
                   </SelectTrigger>
                   <SelectContent>
-                    {STATIONS.map((s) => (
+                    {stationOptions.map((s) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.name}
                       </SelectItem>
