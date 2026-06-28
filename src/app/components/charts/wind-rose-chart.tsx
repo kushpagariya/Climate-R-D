@@ -9,10 +9,12 @@ import {
   Legend,
 } from 'recharts';
 import type { RadiosondeObservation } from '../../data/radiosonde-data';
+import type { AxisLimits } from '../../api/radiosonde';
 
 interface Props {
   data: RadiosondeObservation[];
   compareData?: RadiosondeObservation[];
+  axisLimits?: AxisLimits;
 }
 
 const DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -53,6 +55,7 @@ function buildDirectionBins(data: RadiosondeObservation[]) {
 export function WindRoseChart({
   data,
   compareData,
+  axisLimits,
 }: Props) {
   const bins = buildDirectionBins(data);
   const cmpBins = compareData

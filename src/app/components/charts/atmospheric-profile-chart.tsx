@@ -11,6 +11,7 @@ import {
   Label,
 } from 'recharts';
 import type { RadiosondeObservation } from '../../data/radiosonde-data';
+import type { AxisLimits } from '../../api/radiosonde';
 
 interface Props {
   data: RadiosondeObservation[];
@@ -20,12 +21,14 @@ interface Props {
     lcl: number;
     tropopause: number;
   };
+  axisLimits?: AxisLimits;
 }
 
 export function AtmosphericProfileChart({
   data,
   compareData,
   params,
+  axisLimits,
 }: Props) {
   const merged = data.map((obs, i) => ({
     ...obs,
@@ -62,7 +65,7 @@ export function AtmosphericProfileChart({
         {/* Temperature Axis */}
         <XAxis
           type="number"
-          domain={[-90, 40]}
+          domain={axisLimits?.temperature || [-90, 40]}
           stroke="#94a3b8"
           tick={{ fill: '#94a3b8', fontSize: 10 }}
           label={{
@@ -78,7 +81,7 @@ export function AtmosphericProfileChart({
         <YAxis
           dataKey="height"
           type="number"
-          domain={[0, maxHeight]}
+          domain={axisLimits?.altitude ? [0, axisLimits.altitude[1] / 1000] : [0, maxHeight]}
           reversed={true}
           stroke="#94a3b8"
           tick={{ fill: '#94a3b8', fontSize: 11 }}

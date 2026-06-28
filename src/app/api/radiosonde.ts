@@ -37,11 +37,20 @@ export interface RadiosondeMetadata {
   [key: string]: unknown;
 }
 
+export interface AxisLimits {
+  temperature?: [number, number];
+  pressure?: [number, number];
+  altitude?: [number, number];
+  humidity?: [number, number];
+  windSpeed?: [number, number];
+}
+
 export interface RadiosondeQueryResponse {
   success: boolean;
   profile: RadiosondeObservation[];
   parameters: RadiosondeParameters;
   metadata: RadiosondeMetadata;
+  axisLimits?: AxisLimits;
 }
 
 export interface RadiosondeHistoryItem {
@@ -70,6 +79,7 @@ export interface RadiosondeDetailResponse {
   source: string;
   recordType: string;
   metadata: RadiosondeMetadata;
+  axisLimits?: AxisLimits;
   createdAt?: string;
 }
 
@@ -179,6 +189,7 @@ export async function fetchRadiosondeProfile(
 ): Promise<{
   profile: RadiosondeObservation[];
   parameters: ReturnType<typeof calculateAtmosphericParameters>;
+  axisLimits?: AxisLimits;
   source: "mongodb" | "mock";
 }> {
   if (token) {
@@ -188,6 +199,7 @@ export async function fetchRadiosondeProfile(
         return {
           profile: response.profile,
           parameters: response.parameters ?? calculateAtmosphericParameters(response.profile),
+          axisLimits: response.axisLimits,
           source: "mongodb",
         };
       }

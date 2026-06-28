@@ -9,15 +9,18 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { RadiosondeObservation } from '../../data/radiosonde-data';
+import type { AxisLimits } from '../../api/radiosonde';
 
 interface Props {
   data: RadiosondeObservation[];
   compareData?: RadiosondeObservation[];
+  axisLimits?: AxisLimits;
 }
 
 export function MixingRatioChart({
   data,
   compareData,
+  axisLimits,
 }: Props) {
 
   const merged = data.map((obs, i) => ({
@@ -71,7 +74,7 @@ export function MixingRatioChart({
         <YAxis
           dataKey="height"
           type="number"
-          domain={[0, maxHeight]}
+          domain={axisLimits?.altitude || [0, maxHeight]}
           reversed={true}
           stroke="#94a3b8"
           tick={{ fill: '#94a3b8', fontSize: 11 }}

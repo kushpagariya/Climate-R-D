@@ -9,15 +9,18 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { RadiosondeObservation } from '../../data/radiosonde-data';
+import type { AxisLimits } from '../../api/radiosonde';
 
 interface Props {
   data: RadiosondeObservation[];
   compareData?: RadiosondeObservation[];
+  axisLimits?: AxisLimits;
 }
 
 export function WindProfileChart({
   data,
   compareData,
+  axisLimits,
 }: Props) {
   const sampledData = data.filter((_, i) => i % 3 === 0);
   const sampledCmp = compareData?.filter((_, i) => i % 3 === 0);
@@ -49,7 +52,7 @@ export function WindProfileChart({
         <YAxis
           dataKey="height"
           type="number"
-          domain={[0, 'dataMax']}
+          domain={axisLimits?.altitude || [0, 'dataMax']}
           reversed={true}
           ticks={[
             0,
@@ -77,7 +80,7 @@ export function WindProfileChart({
 
         <XAxis
           type="number"
-          domain={[0, 'auto']}
+          domain={axisLimits?.windSpeed || [0, 'auto']}
           stroke="#94a3b8"
           tick={{ fill: '#94a3b8', fontSize: 10 }}
           tickCount={8}

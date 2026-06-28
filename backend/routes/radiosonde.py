@@ -100,6 +100,7 @@ def serialize_radiosonde_detail(doc):
         "source": doc.get("source", "api"),
         "recordType": doc.get("recordType", "sounding"),
         "metadata": doc.get("metadata") or {},
+        "axisLimits": doc.get("axisLimits"),
         "createdAt": doc.get("createdAt").isoformat() if doc.get("createdAt") else None,
     }
 
@@ -174,6 +175,7 @@ def get_radiosonde():
             "success": True,
             "profile": detail["profile"],
             "parameters": detail["parameters"],
+            "axisLimits": detail.get("axisLimits"),
             "metadata": {
                 **detail["metadata"],
                 "id": detail["id"],

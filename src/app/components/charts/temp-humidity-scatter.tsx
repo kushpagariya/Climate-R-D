@@ -10,15 +10,18 @@ import {
   ZAxis,
 } from 'recharts';
 import type { RadiosondeObservation } from '../../data/radiosonde-data';
+import type { AxisLimits } from '../../api/radiosonde';
 
 interface Props {
   data: RadiosondeObservation[];
   compareData?: RadiosondeObservation[];
+  axisLimits?: AxisLimits;
 }
 
 export function TempHumidityScatterChart({
   data,
   compareData,
+  axisLimits,
 }: Props) {
   const sampledData = data
     .filter((_, i) => i % 2 === 0)
@@ -61,7 +64,7 @@ export function TempHumidityScatterChart({
           type="number"
           dataKey="temperature"
           name="Temperature"
-          domain={[-60, 30]}
+          domain={axisLimits?.temperature || [-60, 30]}
           stroke="#94a3b8"
           tick={{ fill: '#94a3b8', fontSize: 10 }}
           tickCount={7}
@@ -78,7 +81,7 @@ export function TempHumidityScatterChart({
           type="number"
           dataKey="relativeHumidity"
           name="Humidity"
-          domain={[0, 100]}
+          domain={axisLimits?.humidity || [0, 100]}
           stroke="#94a3b8"
           tick={{ fill: '#94a3b8', fontSize: 10 }}
           tickCount={6}

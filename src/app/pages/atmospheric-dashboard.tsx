@@ -58,6 +58,7 @@ import {
   fetchRadiosondeProfile,
   fetchHistoryOverlayProfile,
   saveRadiosondeApi,
+  type AxisLimits,
 } from "../api/radiosonde";
 import { useSearchParams } from "react-router";
 
@@ -210,6 +211,7 @@ export function AtmosphericDashboard() {
   const [data, setData] = useState<RadiosondeObservation[]>(() =>
     generateRadiosondeProfile(selectedDate, selectedTime, selectedStation),
   );
+  const [axisLimits, setAxisLimits] = useState<AxisLimits | undefined>(undefined);
   const [balloonHistory, setBalloonHistory] = useState<BalloonRecord[]>(() =>
     generateBalloonHistory(selectedStation, 14),
   );
@@ -245,6 +247,7 @@ export function AtmosphericDashboard() {
       if (cancelled) return;
 
       setData(result.profile);
+      setAxisLimits(result.axisLimits);
 
       if (result.source === "mock" && session?.token) {
         void saveRadiosondeApi(session.token, {
@@ -783,6 +786,7 @@ export function AtmosphericDashboard() {
                     data={sliced}
                     compareData={slicedCmp}
                     params={params}
+                    axisLimits={axisLimits}
                   />
                   <div className="flex flex-wrap gap-5 mt-3 text-[11px] text-slate-400">
                     <span>
@@ -830,7 +834,7 @@ export function AtmosphericDashboard() {
                 badge="POLAR"
               >
                 {(sliced, slicedCmp) => (
-                  <WindRoseChart data={sliced} compareData={slicedCmp} />
+                  <WindRoseChart data={sliced} compareData={slicedCmp} axisLimits={axisLimits} />
                 )}
               </ChartZoomWrapper>
             </GlassCard>
@@ -842,7 +846,7 @@ export function AtmosphericDashboard() {
                 badge="BARBS"
               >
                 {(sliced, slicedCmp) => (
-                  <WindProfileChart data={sliced} compareData={slicedCmp} />
+                  <WindProfileChart data={sliced} compareData={slicedCmp} axisLimits={axisLimits} />
                 )}
               </ChartZoomWrapper>
             </GlassCard>
@@ -862,6 +866,7 @@ export function AtmosphericDashboard() {
                   <HumidityProfileChart
                     data={sliced}
                     compareData={slicedCmp}
+                    axisLimits={axisLimits}
                   />
                 )}
               </ChartZoomWrapper>
@@ -874,7 +879,7 @@ export function AtmosphericDashboard() {
                 badge="g/kg"
               >
                 {(sliced, slicedCmp) => (
-                  <MixingRatioChart data={sliced} compareData={slicedCmp} />
+                  <MixingRatioChart data={sliced} compareData={slicedCmp} axisLimits={axisLimits} />
                 )}
               </ChartZoomWrapper>
             </GlassCard>
@@ -894,6 +899,7 @@ export function AtmosphericDashboard() {
                   <PressureProfileChart
                     data={sliced}
                     compareData={slicedCmp}
+                    axisLimits={axisLimits}
                   />
                 )}
               </ChartZoomWrapper>
@@ -909,6 +915,7 @@ export function AtmosphericDashboard() {
                   <TempHumidityScatterChart
                     data={sliced}
                     compareData={slicedCmp}
+                    axisLimits={axisLimits}
                   />
                 )}
               </ChartZoomWrapper>

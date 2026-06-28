@@ -9,15 +9,18 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { RadiosondeObservation } from '../../data/radiosonde-data';
+import type { AxisLimits } from '../../api/radiosonde';
 
 interface Props {
   data: RadiosondeObservation[];
   compareData?: RadiosondeObservation[];
+  axisLimits?: AxisLimits;
 }
 
 export function HumidityProfileChart({
   data,
   compareData,
+  axisLimits,
 }: Props) {
 
   const merged = data.map((obs, i) => ({
@@ -54,7 +57,7 @@ export function HumidityProfileChart({
 
         <XAxis
           type="number"
-          domain={[0, 100]}
+          domain={axisLimits?.humidity || [0, 100]}
           stroke="#94a3b8"
           tick={{ fill: '#94a3b8', fontSize: 10 }}
           tickCount={6}
@@ -70,7 +73,7 @@ export function HumidityProfileChart({
         <YAxis
           dataKey="height"
           type="number"
-          domain={[0, maxHeight]}
+          domain={axisLimits?.altitude || [0, maxHeight]}
           reversed={true}
           stroke="#94a3b8"
           tick={{ fill: '#94a3b8', fontSize: 11 }}

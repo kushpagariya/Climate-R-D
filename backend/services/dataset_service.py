@@ -35,7 +35,7 @@ VALIDATION_RULES = {
 def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch_callback=None, chunk_size=10000):
     """
     Parses a CSV/XLSX file in chunks, validates it against meteorological bounds, 
-    triggers batch inserts via callback, and returns quality reports.
+    triggers batch inserts via callback, and returns quality reports, observations, and axis limits.
     """
     missing_records_report = []
     duplicate_records_report = []
@@ -44,9 +44,23 @@ def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch
     total_rows = 0
     inserted_rows = 0
     seen_datetime = set()
+    observations = []
     
+    header_row_idx = 0
     if file_ext == "csv":
-        iterator = pd.read_csv(file_object, chunksize=chunk_size)
+        try:
+            file_object.seek(0)
+            for i, line in enumerate(file_object):
+                line_str = line.decode('utf-8', errors='ignore') if isinstance(line, bytes) else line
+                lower_line = line_str.lower()
+                if ("temp" in lower_line or "press" in lower_line) and ("time" in lower_line or "date" in lower_line or "height" in lower_line or "alt" in lower_line):
+                    header_row_idx = i
+                    break
+            file_object.seek(0)
+        except Exception:
+            file_object.seek(0)
+        
+        iterator = pd.read_csv(file_object, skiprows=header_row_idx, chunksize=chunk_size, on_bad_lines='skip')
     elif file_ext in ["xls", "xlsx"]:
         df = pd.read_excel(file_object)
         iterator = [df[i:i+chunk_size] for i in range(0, df.shape[0], chunk_size)]
@@ -71,20 +85,20 @@ def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch
         # Now lowercased strings
         chunk_df.columns = [str(c).strip().lower() for c in chunk_df.columns]
         
-        if "date" not in chunk_df.columns:
-            raise ValueError("Dataset must contain a 'date' column")
+        if "date" not in chunk_df.columns and "time" not in chunk_df.columns:
+            pass
 
         batch_records = []
         
         for index, row in chunk_df.iterrows():
             total_rows += 1
-            row_num = total_rows + 1
+            row_num = total_rows + header_row_idx + 1
             
             try:
-                date_val = str(row["date"]).strip()
+                date_val = str(row.get("date", "")).strip()
+                time_val = str(row.get("time", "")).strip()
                 if not date_val or date_val.lower() == "nan":
-                    invalid_records_report.append({"row": row_num, "reason": "Missing date"})
-                    continue
+                    date_val = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 
                 try:
                     pd.to_datetime(date_val)
@@ -102,14 +116,13 @@ def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch
                     "createdAt": datetime.now(timezone.utc),
                 }
 
-                time_val = str(row.get("time", "")).strip()
                 if time_val and time_val.lower() != "nan":
                     record["time"] = time_val
                     dt_key = f"{date_val}_{time_val}"
                 else:
-                    dt_key = date_val
+                    dt_key = f"{date_val}_{row_num}"
 
-                if dt_key in seen_datetime:
+                if dt_key in seen_datetime and "time" in record:
                     duplicate_records_report.append({
                         "row": row_num,
                         "date": date_val,
@@ -144,6 +157,7 @@ def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch
                         record[internal_field] = val
 
                 validate_and_set("temperature")
+                validate_and_set("dewPoint", "dewpoint")
                 validate_and_set("pressure")
                 validate_and_set("humidity")
                 
@@ -181,6 +195,26 @@ def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch
                     })
 
                 batch_records.append(record)
+                
+                obs = {}
+                if "pressure" in record: obs["pressure"] = record["pressure"]
+                if "altitude" in record: 
+                    obs["height"] = record["altitude"]
+                    obs["altitude"] = record["altitude"]
+                elif "height" in record:
+                    obs["height"] = record["height"]
+                    obs["altitude"] = record["height"]
+                if "temperature" in record: obs["temperature"] = record["temperature"]
+                if "dewPoint" in record: obs["dewPoint"] = record["dewPoint"]
+                if "humidity" in record: obs["relativeHumidity"] = record["humidity"]
+                if "windSpeed" in record: obs["windSpeed"] = record["windSpeed"]
+                if "windDirection" in record: obs["windDirection"] = record["windDirection"]
+                if "latitude" in record: obs["latitude"] = record["latitude"]
+                if "longitude" in record: obs["longitude"] = record["longitude"]
+                
+                if obs:
+                    observations.append(obs)
+                
                 inserted_rows += 1
                 
             except Exception as e:
@@ -198,4 +232,23 @@ def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch
         "invalidCount": len(invalid_records_report),
     }
 
-    return missing_records_report, duplicate_records_report, invalid_records_report, stats
+    axisLimits = {}
+    if observations:
+        def get_limits(key, pad_percent=0.1):
+            vals = [o[key] for o in observations if key in o and o[key] is not None]
+            if not vals:
+                return None
+            vmin, vmax = min(vals), max(vals)
+            span = vmax - vmin
+            if span == 0: span = 10
+            return [vmin - span * pad_percent, vmax + span * pad_percent]
+
+        axisLimits = {
+            "temperature": get_limits("temperature"),
+            "pressure": get_limits("pressure"),
+            "altitude": get_limits("height"),
+            "humidity": get_limits("relativeHumidity"),
+            "windSpeed": get_limits("windSpeed"),
+        }
+
+    return missing_records_report, duplicate_records_report, invalid_records_report, stats, observations, axisLimits

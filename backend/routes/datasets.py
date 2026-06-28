@@ -71,7 +71,7 @@ def upload_dataset():
             if batch:
                 weather_records_col.insert_many(batch, ordered=False)
 
-        missing_report, dup_report, invalid_report, stats = process_weather_dataset(
+        missing_report, dup_report, invalid_report, stats, observations, axisLimits = process_weather_dataset(
             file, file_ext, station_id, str(dataset_id), batch_callback=insert_batch
         )
 
@@ -87,6 +87,37 @@ def upload_dataset():
                 }
             },
         )
+
+        # Also store as a sounding in radiosonde_history
+        if observations:
+            now = utc_now()
+            date_val = now.strftime("%Y-%m-%d")
+            time_val = "12:00" if now.hour >= 12 else "00:00"
+            
+            # Extract date/time from the first valid record if possible
+            if len(observations) > 0:
+                first_obs = weather_records_col.find_one({"datasetId": str(dataset_id)})
+                if first_obs and "date" in first_obs:
+                    date_val = first_obs["date"]
+                    time_val = first_obs.get("time", time_val)
+
+            sounding_doc = {
+                "userId": g.user["_id"],
+                "stationId": station_id,
+                "date": date_val,
+                "time": time_val,
+                "observations": observations,
+                "axisLimits": axisLimits,
+                "source": "csv_upload",
+                "recordType": "sounding",
+                "metadata": {
+                    "datasetId": str(dataset_id),
+                    "filename": filename,
+                    "label": f"Uploaded {date_val} {time_val}"
+                },
+                "createdAt": now,
+            }
+            g.db["radiosonde_history"].insert_one(sounding_doc)
 
         log_activity(action="upload_dataset", resource_type="dataset", resource_id=str(dataset_id))
 

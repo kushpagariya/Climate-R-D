@@ -199,6 +199,7 @@ def get_atmosphere():
                 "humidityProfile": _build_profile(
                     observations, "relativeHumidity", "humidity"
                 ),
+                "axisLimits": doc.get("axisLimits"),
                 "layers": _detect_atmospheric_layers(observations),
                 "metadata": {
                     "stationId": doc.get("stationId"),
