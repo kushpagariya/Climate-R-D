@@ -289,9 +289,9 @@ export function PreLaunchPage() {
               <div className="mb-5 flex items-center gap-3">
                 <Database className="h-5 w-5 text-cyan-300" />
                 <div>
-                  <h2 className="text-lg font-medium">Sounding CSV Upload</h2>
+                  <h2 className="text-lg font-medium">Sounding Dataset Upload</h2>
                   <p className="text-sm text-muted-foreground">
-                    CSV upload is the primary workflow and fills surface observations from row 1.
+                    Upload a radiosonde dataset (.csv or .txt). The backend will automatically detect the file format, validate the data, and generate atmospheric visualizations.
                   </p>
                 </div>
               </div>

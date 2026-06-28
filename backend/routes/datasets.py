@@ -49,8 +49,8 @@ def upload_dataset():
     filename = secure_filename(file.filename)
     file_ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
 
-    if file_ext not in ["csv", "xls", "xlsx"]:
-        return jsonify({"success": False, "error": "Only CSV and XLSX files are allowed"}), 400
+    if file_ext not in ["csv", "xls", "xlsx", "txt"]:
+        return jsonify({"success": False, "error": "Only CSV, TXT, and XLSX files are allowed"}), 400
 
     datasets_col = g.db["datasets"]
     dataset_doc = {

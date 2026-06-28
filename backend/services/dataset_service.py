@@ -5,20 +5,20 @@ from bson import ObjectId
 import re
 
 CSV_ALIASES = {
-    "pressure": ["pressure_hpa", "pressure(hpa)", "pressure", "pressure hpa"],
-    "altitude": ["geopotential_height_m", "height(m)", "height", "geopotential height", "altitude", "altitude(m)"],
-    "temperature": ["temperature_c", "temp(°c)", "temperature", "temp", "air temperature"],
-    "dewPoint": ["dew_point_temperature_c", "dewpt(°c)", "dew point", "dewpoint"],
-    "humidity": ["relative_humidity_%", "rh(%)", "rh", "humidity", "relative humidity"],
-    "windspeed": ["wind_speed_m_s", "wind(m/s)", "wind speed", "windspeed", "wind"],
-    "winddirection": ["wind_direction_degree", "dir(°)", "direction", "wind direction", "winddirection"],
-    "latitude": ["latitude", "lat"],
-    "longitude": ["longitude", "lon", "lng"]
+    "pressure": ["pressure_hpa", "pressure(hpa)", "pressure", "pressure hpa", "p"],
+    "altitude": ["geopotential_height_m", "height(m)", "height", "geopotential height", "altitude", "altitude(m)", "geopot", "alt"],
+    "temperature": ["temperature_c", "temp(°c)", "temperature", "temp", "air temperature", "t"],
+    "dewPoint": ["dew_point_temperature_c", "dewpt(°c)", "dew point", "dewpoint", "dewp.", "dewp"],
+    "humidity": ["relative_humidity_%", "rh(%)", "rh", "humidity", "relative humidity", "hu"],
+    "windspeed": ["wind_speed_m_s", "wind(m/s)", "wind speed", "windspeed", "wind", "ws"],
+    "winddirection": ["wind_direction_degree", "dir(°)", "direction", "wind direction", "winddirection", "wd"],
+    "latitude": ["latitude", "lat", "lat."],
+    "longitude": ["longitude", "lon", "lng", "long", "long."]
 }
 
 def _normalize_column_name(col):
     c = str(col).lower()
-    c = re.sub(r'[\s_\-\(\)°%]', '', c)
+    c = re.sub(r'[\s_\-\(\)°%\.]', '', c)
     return c
 
 VALIDATION_RULES = {
@@ -47,12 +47,18 @@ def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch
     observations = []
     
     header_row_idx = 0
-    if file_ext == "csv":
+    is_txt_format = False
+    
+    if file_ext in ["csv", "txt"]:
         try:
             file_object.seek(0)
             for i, line in enumerate(file_object):
                 line_str = line.decode('utf-8', errors='ignore') if isinstance(line, bytes) else line
-                lower_line = line_str.lower()
+                lower_line = line_str.lower().strip()
+                if lower_line.startswith("profile data:"):
+                    header_row_idx = i + 1
+                    is_txt_format = True
+                    break
                 if ("temp" in lower_line or "press" in lower_line) and ("time" in lower_line or "date" in lower_line or "height" in lower_line or "alt" in lower_line):
                     header_row_idx = i
                     break
@@ -60,7 +66,11 @@ def process_weather_dataset(file_object, file_ext, station_id, dataset_id, batch
         except Exception:
             file_object.seek(0)
         
-        iterator = pd.read_csv(file_object, skiprows=header_row_idx, chunksize=chunk_size, on_bad_lines='skip')
+        if is_txt_format:
+            skip_list = list(range(header_row_idx)) + [header_row_idx + 1]
+            iterator = pd.read_csv(file_object, skiprows=skip_list, sep=r'\s+', chunksize=chunk_size, on_bad_lines='skip')
+        else:
+            iterator = pd.read_csv(file_object, skiprows=header_row_idx, chunksize=chunk_size, on_bad_lines='skip')
     elif file_ext in ["xls", "xlsx"]:
         df = pd.read_excel(file_object)
         iterator = [df[i:i+chunk_size] for i in range(0, df.shape[0], chunk_size)]

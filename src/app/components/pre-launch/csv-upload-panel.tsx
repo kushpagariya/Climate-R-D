@@ -21,9 +21,9 @@ export function CsvUploadPanel({ onParsed }: Props) {
     setMessage(null);
     setError(null);
 
-    if (!file.name.toLowerCase().endsWith(".csv")) {
+    if (!file.name.toLowerCase().endsWith(".csv") && !file.name.toLowerCase().endsWith(".txt")) {
       setPreview(null);
-      setError("Upload a CSV file.");
+      setError("Upload a CSV or TXT file.");
       return;
     }
 
@@ -64,7 +64,7 @@ export function CsvUploadPanel({ onParsed }: Props) {
         <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
           <FileUp className="h-6 w-6" />
         </div>
-        <div className="text-sm font-medium">Drop sounding CSV here</div>
+        <div className="text-sm font-medium">Drop sounding dataset here</div>
         <div className="mt-1 text-xs text-muted-foreground">
           Required columns are validated before upload.
         </div>
@@ -80,7 +80,7 @@ export function CsvUploadPanel({ onParsed }: Props) {
         <input
           ref={inputRef}
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,.txt,text/csv,text/plain"
           className="hidden"
           onChange={(event) => {
             const file = event.target.files?.[0];
