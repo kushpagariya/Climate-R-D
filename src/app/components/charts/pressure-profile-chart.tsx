@@ -75,7 +75,7 @@ export function PressureProfileChart({
         <YAxis
           dataKey="height"
           type="number"
-          domain={axisLimits?.altitude || [0, maxHeight]}
+          domain={axisLimits?.altitude ? [0, axisLimits.altitude[1] / 1000] : [0, maxHeight]}
           reversed={true}
           stroke="#94a3b8"
           tick={{ fill: '#94a3b8', fontSize: 11 }}

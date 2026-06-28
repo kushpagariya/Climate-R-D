@@ -30,11 +30,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import {
-  calculateAtmosphericParameters,
-  type RadiosondeObservation,
-  type BalloonRecord,
-} from "../data/radiosonde-data";
 import { AtmosphericProfileChart } from "../components/charts/atmospheric-profile-chart";
 import { WindRoseChart } from "../components/charts/wind-rose-chart";
 import { WindProfileChart } from "../components/charts/wind-profile-chart";
@@ -50,11 +45,83 @@ import { createGraphHistoryApi, getGraphHistoryApi } from "../api/history";
 import { createSavedAnalysisApi, getSavedAnalysesApi } from "../api/analysis";
 import { createFavoriteApi, getFavoritesApi } from "../api/favorites";
 import { logActivityApi } from "../api/activity";
-import { saveRadiosondeApi, type AxisLimits, type RadiosondeParameters } from "../api/radiosonde";
-import { getDashboardSoundingApi, type DashboardLaunchOption } from "../api/dashboard";
+import {
+  getDashboardSoundingApi,
+  type DashboardAxisLimits,
+  type DashboardLaunchOption,
+  type DashboardSoundingObservation,
+  type DashboardSoundingParameters,
+} from "../api/dashboard";
 import { useSearchParams } from "react-router";
 
 type TimeSlot = string;
+type RadiosondeObservation = DashboardSoundingObservation;
+type RadiosondeParameters = DashboardSoundingParameters;
+type AxisLimits = DashboardAxisLimits;
+
+interface BalloonRecord {
+  id: string;
+  date: string;
+  time: string;
+  stationId: string;
+  label: string;
+}
+
+const EMPTY_PARAMS: RadiosondeParameters = {
+  freezingLevel: 0,
+  lcl: 0,
+  tropopause: 0,
+  surfaceTemperature: 0,
+  surfacePressure: 0,
+  surfaceHumidity: 0,
+  maxWindSpeed: 0,
+  maxWindHeight: 0,
+  maxAltitude: 0,
+  cape: 0,
+};
+
+function calculateAtmosphericParameters(data: RadiosondeObservation[]): RadiosondeParameters {
+  if (data.length === 0) return EMPTY_PARAMS;
+
+  const freezingLevel = data.find((obs) => obs.temperature <= 0)?.height || 0;
+  let lcl = 0;
+  for (const obs of data) {
+    if (obs.height >= 3000) continue;
+    if (obs.temperature - obs.dewPoint < 2) {
+      lcl = obs.height;
+      break;
+    }
+  }
+
+  let tropopause = data[data.length - 1]?.height || 0;
+  for (let i = 1; i < data.length - 1; i += 1) {
+    const heightDelta = (data[i + 1].height - data[i - 1].height) / 1000;
+    if (heightDelta === 0) continue;
+    const lapseRate = (data[i - 1].temperature - data[i + 1].temperature) / heightDelta;
+    if (lapseRate < 2 && data[i].height > 8000) {
+      tropopause = data[i].height;
+      break;
+    }
+  }
+
+  const surface = data[0];
+  const maxWindSpeed = Math.max(...data.map((obs) => obs.windSpeed));
+  const maxWindObs = data.find((obs) => obs.windSpeed === maxWindSpeed) || surface;
+  const cape = surface.temperature - surface.dewPoint < 5 ? 1200 : 400;
+
+  return {
+    freezingLevel,
+    lcl,
+    tropopause,
+    surfaceTemperature: surface.temperature,
+    surfacePressure: surface.pressure,
+    surfaceHumidity: surface.relativeHumidity,
+    maxWindSpeed,
+    maxWindHeight: maxWindObs.height,
+    maxAltitude: data[data.length - 1].height,
+    cape,
+  };
+}
 
 function KpiCard({
   icon,
@@ -174,7 +241,6 @@ function BalloonHistoryItem({
 }
 
 export function AtmosphericDashboard() {
-  const today = new Date().toISOString().split("T")[0];
   const { session } = useAuth();
   const [searchParams] = useSearchParams();
   const queryStation = searchParams.get("station");
@@ -190,6 +256,7 @@ export function AtmosphericDashboard() {
   const [dashboardMessage, setDashboardMessage] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [serverParams, setServerParams] = useState<RadiosondeParameters | null>(null);
+  const [isLoadingSounding, setIsLoadingSounding] = useState(false);
 
   const [compareOpen, setCompareOpen] = useState(queryCompare === "true");
   const [comparePanelData, setComparePanelData] = useState<RadiosondeObservation[] | undefined>(undefined);
@@ -230,11 +297,14 @@ export function AtmosphericDashboard() {
       if (!session?.token) {
         setData([]);
         setAxisLimits(undefined);
+        setServerParams(null);
+        setAvailableLaunches([]);
         setDashboardMessage("Sign in to load launch telemetry.");
         return;
       }
 
       try {
+        setIsLoadingSounding(true);
         const result = await getDashboardSoundingApi(session.token, {
           stationId: selectedStation || undefined,
           date: selectedDate || undefined,
@@ -267,6 +337,10 @@ export function AtmosphericDashboard() {
           setServerParams(null);
           setDashboardError(err instanceof Error ? err.message : "Unable to load dashboard telemetry.");
           setDashboardMessage(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingSounding(false);
         }
       }
     }
@@ -351,6 +425,16 @@ export function AtmosphericDashboard() {
     return Array.from(byStation.values());
   }, [availableLaunches]);
 
+  const dateOptions = useMemo(() => {
+    const values = new Set<string>();
+    availableLaunches
+      .filter((launch) => !selectedStation || launch.stationId === selectedStation)
+      .forEach((launch) => {
+        if (launch.date) values.add(launch.date);
+      });
+    return Array.from(values).sort((a, b) => b.localeCompare(a));
+  }, [availableLaunches, selectedStation]);
+
   const timeOptions = useMemo(() => {
     const values = new Set<string>();
     availableLaunches
@@ -358,14 +442,31 @@ export function AtmosphericDashboard() {
       .forEach((launch) => {
         if (launch.time) values.add(launch.time);
       });
-    if (selectedTime) values.add(selectedTime);
     return Array.from(values).sort();
-  }, [availableLaunches, selectedDate, selectedStation, selectedTime]);
+  }, [availableLaunches, selectedDate, selectedStation]);
 
   const station = stationOptions.find((s) => s.id === selectedStation) || {
     id: selectedStation,
     name: selectedStation || "No launch selected",
   };
+
+  useEffect(() => {
+    if (!availableLaunches.length) return;
+    if (selectedStation && stationOptions.some((s) => s.id === selectedStation)) return;
+    setSelectedStation(stationOptions[0]?.id || "");
+  }, [availableLaunches.length, selectedStation, stationOptions]);
+
+  useEffect(() => {
+    if (!selectedStation || !dateOptions.length) return;
+    if (selectedDate && dateOptions.includes(selectedDate)) return;
+    setSelectedDate(dateOptions[0]);
+  }, [dateOptions, selectedDate, selectedStation]);
+
+  useEffect(() => {
+    if (!selectedDate || !timeOptions.length) return;
+    if (selectedTime && timeOptions.includes(selectedTime)) return;
+    setSelectedTime(timeOptions[0]);
+  }, [selectedDate, selectedTime, timeOptions]);
 
   useEffect(() => {
     if (!session?.token) return;
@@ -478,6 +579,8 @@ export function AtmosphericDashboard() {
   ]);
 
   const handleExport = () => {
+    if (data.length === 0) return;
+
     const rows = [
       [
         "Pressure(hPa)",
@@ -509,17 +612,6 @@ export function AtmosphericDashboard() {
     URL.revokeObjectURL(url);
 
     if (session?.token) {
-      void saveRadiosondeApi(session.token, {
-        stationId: selectedStation,
-        date: selectedDate,
-        time: selectedTime,
-        observations: data,
-        source: "mock",
-        recordType: "sounding",
-        metadata: {
-          label: `${selectedDate} ${selectedTime}`,
-        },
-      });
       void createSavedAnalysisApi(session.token, {
         stationId: selectedStation,
         date: selectedDate,
@@ -545,7 +637,10 @@ export function AtmosphericDashboard() {
   const windDelta = prevParams
     ? params.maxWindSpeed - prevParams.maxWindSpeed
     : undefined;
-  const aiConfidence = 80 + Math.round(params.surfaceHumidity / 10);
+  const hasProfile = data.length > 0;
+  const statusMessage = dashboardError || dashboardMessage;
+  const geoHeight = hasProfile ? data[0]?.height ?? 0 : 0;
+  const aiConfidence = hasProfile ? Math.min(99, 80 + Math.round(params.surfaceHumidity / 10)) : 0;
 
   return (
     <div className="flex" style={{ minHeight: "100%", background: "transparent" }}>
@@ -639,18 +734,22 @@ export function AtmosphericDashboard() {
                 <label className="text-[10px] uppercase tracking-widest text-slate-400">
                   Date
                 </label>
-                <input
-                  type="date"
+                <Select
                   value={selectedDate}
-                  max={today}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="h-9 px-3 rounded-md border text-sm"
-                  style={{
-                    background: "rgba(30,41,59,0.8)",
-                    borderColor: "rgba(148,163,184,0.2)",
-                    color: "#e2e8f0",
-                  }}
-                />
+                  onValueChange={setSelectedDate}
+                  disabled={dateOptions.length === 0}
+                >
+                  <SelectTrigger className="w-[160px] bg-secondary/40 text-sm h-9">
+                    <SelectValue placeholder="Select date" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {dateOptions.map((dateOption) => (
+                      <SelectItem key={dateOption} value={dateOption}>
+                        {dateOption}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-1">
@@ -660,13 +759,17 @@ export function AtmosphericDashboard() {
                 <Select
                   value={selectedTime}
                   onValueChange={(v) => setSelectedTime(v as TimeSlot)}
+                  disabled={timeOptions.length === 0}
                 >
                   <SelectTrigger className="w-[150px] bg-secondary/40 text-sm h-9">
-                    <SelectValue />
+                    <SelectValue placeholder="Select time" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="00:00">00:00 UTC — Midnight</SelectItem>
-                    <SelectItem value="12:00">12:00 UTC — Noon</SelectItem>
+                    {timeOptions.map((timeOption) => (
+                      <SelectItem key={timeOption} value={timeOption}>
+                        {timeOption} UTC
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -711,7 +814,15 @@ export function AtmosphericDashboard() {
                     <RefreshCw className="w-4 h-4" />
                     Refresh
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleExport}>
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      if (!hasProfile) {
+                        event.preventDefault();
+                        return;
+                      }
+                      handleExport();
+                    }}
+                  >
                     <Download className="w-4 h-4" />
                     Export
                   </DropdownMenuItem>
@@ -740,6 +851,19 @@ export function AtmosphericDashboard() {
                 </button>
               </div>
             )}
+
+            {(isLoadingSounding || statusMessage) && (
+              <div
+                className="mt-3 rounded-lg border px-3 py-2 text-xs"
+                style={{
+                  borderColor: dashboardError ? "rgba(248,113,113,0.35)" : "rgba(148,163,184,0.16)",
+                  background: dashboardError ? "rgba(127,29,29,0.18)" : "rgba(15,23,42,0.45)",
+                  color: dashboardError ? "#fca5a5" : "#94a3b8",
+                }}
+              >
+                {isLoadingSounding ? "Loading launch telemetry..." : statusMessage}
+              </div>
+            )}
           </GlassCard>
 
           {/* Compare Panel */}
@@ -747,7 +871,8 @@ export function AtmosphericDashboard() {
             <ComparePanel
               stationId={selectedStation}
               primaryDate={selectedDate}
-              primaryTime={selectedTime === "00:00" ? ("00:00" as "00:00") : ("12:00" as "12:00")}
+              primaryTime={selectedTime}
+              availableLaunches={availableLaunches}
               onCompareData={setComparePanelData}
               onClose={() => { setCompareOpen(false); setComparePanelData(undefined); }}
             />
@@ -798,7 +923,7 @@ export function AtmosphericDashboard() {
             <KpiCard
               icon={<Layers className="w-4 h-4" />}
               label="Geo. Height"
-              value="0"
+              value={geoHeight.toFixed(0)}
               unit="m ASL"
               sub="Surface"
               color="#a855f7"
@@ -970,10 +1095,19 @@ export function AtmosphericDashboard() {
           {/* §05 CORRELATION INTELLIGENCE */}
           <SectionLabel code="§05" title="CORRELATION INTELLIGENCE" />
           <GlassCard>
-            <CorrelationHeatmap
-              data={data}
-              compareData={effectiveCompareData}
-            />
+            {hasProfile ? (
+              <CorrelationHeatmap
+                data={data}
+                compareData={effectiveCompareData}
+              />
+            ) : (
+              <div className="flex h-[260px] flex-col items-center justify-center gap-2 text-center">
+                <div className="text-sm text-slate-300">No telemetry data</div>
+                <div className="max-w-sm text-xs text-slate-500">
+                  Select a launch with stored telemetry to render the correlation matrix.
+                </div>
+              </div>
+            )}
           </GlassCard>
         </div>
       </div>

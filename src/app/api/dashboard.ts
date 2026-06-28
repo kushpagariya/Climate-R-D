@@ -1,10 +1,50 @@
 import { apiRequest } from "./client";
-import type {
-  AxisLimits,
-  RadiosondeMetadata,
-  RadiosondeParameters,
-} from "./radiosonde";
-import type { RadiosondeObservation } from "../data/radiosonde-data";
+
+export interface DashboardSoundingObservation {
+  pressure: number;
+  height: number;
+  temperature: number;
+  dewPoint: number;
+  icePoint: number;
+  relativeHumidity: number;
+  humidityWrtIce: number;
+  mixingRatio: number;
+  windDirection: number;
+  windSpeed: number;
+}
+
+export interface DashboardSoundingParameters {
+  freezingLevel: number;
+  lcl: number;
+  tropopause: number;
+  surfaceTemperature: number;
+  surfacePressure: number;
+  surfaceHumidity: number;
+  maxWindSpeed: number;
+  maxWindHeight: number;
+  maxAltitude: number;
+  cape: number;
+}
+
+export interface DashboardSoundingMetadata {
+  id?: string;
+  stationId?: string;
+  date?: string;
+  time?: string;
+  source?: string;
+  recordType?: string;
+  telemetryCount?: number;
+  sondeNumber?: string;
+  [key: string]: unknown;
+}
+
+export interface DashboardAxisLimits {
+  temperature?: [number, number];
+  pressure?: [number, number];
+  altitude?: [number, number];
+  humidity?: [number, number];
+  windSpeed?: [number, number];
+}
 
 export interface DashboardLaunchOption {
   id: string;
@@ -17,10 +57,10 @@ export interface DashboardLaunchOption {
 
 export interface DashboardSoundingResponse {
   success: boolean;
-  profile: RadiosondeObservation[];
-  parameters: RadiosondeParameters;
-  metadata: RadiosondeMetadata;
-  axisLimits?: AxisLimits | null;
+  profile: DashboardSoundingObservation[];
+  parameters: DashboardSoundingParameters;
+  metadata: DashboardSoundingMetadata;
+  axisLimits?: DashboardAxisLimits | null;
   launch?: DashboardLaunchOption | null;
   availableLaunches: DashboardLaunchOption[];
   message?: string;

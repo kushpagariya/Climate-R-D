@@ -1,5 +1,6 @@
 from datetime import timezone
 
+from bson import ObjectId
 from flask import Blueprint, g, jsonify, request
 
 from auth_utils import require_auth, utc_now
@@ -189,8 +190,19 @@ def _build_launch_query(user_id, station_id=None, date=None, time_value=None):
     return query
 
 
+def _launch_id_values(launch_id):
+    values = [launch_id, str(launch_id)]
+    if not isinstance(launch_id, ObjectId):
+        try:
+            values.append(ObjectId(launch_id))
+        except Exception:
+            pass
+    return values
+
+
 def _telemetry_collection_for_launch(db, launch_id):
-    if db["telemetry"].find_one({"launchId": launch_id}, {"_id": 1}):
+    query = {"launchId": {"$in": _launch_id_values(launch_id)}}
+    if db["telemetry"].find_one(query, {"_id": 1}):
         return "telemetry"
     return "live_telemetry"
 
@@ -199,7 +211,7 @@ def _load_launch_profile(db, launch):
     collection_name = _telemetry_collection_for_launch(db, launch["_id"])
     docs = list(
         db[collection_name]
-        .find({"launchId": launch["_id"]})
+        .find({"launchId": {"$in": _launch_id_values(launch["_id"])}})
         .sort([("second", 1), ("timestamp", 1), ("_id", 1)])
         .limit(DEFAULT_SOUNDING_LIMIT)
     )
@@ -405,77 +417,84 @@ def get_dashboard_sounding():
 
     Returns a launch-backed atmospheric profile built from telemetry.
     """
-    db = g.db
-    user_id = g.user["_id"]
-    station_id = (request.args.get("stationId") or "").strip()
-    date = (request.args.get("date") or "").strip()
-    time_value = _launch_time_value((request.args.get("time") or "").strip())
+    try:
+        db = g.db
+        user_id = g.user["_id"]
+        station_id = (request.args.get("stationId") or "").strip()
+        date = (request.args.get("date") or "").strip()
+        time_value = _launch_time_value((request.args.get("time") or "").strip())
 
-    options_cursor = (
-        db["launches"]
-        .find({"userId": user_id})
-        .sort([("launchDate", -1), ("launchTime", -1), ("createdAt", -1)])
-        .limit(250)
-    )
-    launch_options = [_serialize_launch_option(doc) for doc in options_cursor]
+        options_cursor = (
+            db["launches"]
+            .find({"userId": user_id})
+            .sort([("launchDate", -1), ("launchTime", -1), ("createdAt", -1)])
+            .limit(250)
+        )
+        launch_options = [_serialize_launch_option(doc) for doc in options_cursor]
 
-    query = _build_launch_query(
-        user_id,
-        station_id=station_id or None,
-        date=date or None,
-        time_value=time_value or None,
-    )
-    launch = db["launches"].find_one(
-        query,
-        sort=[("launchDate", -1), ("launchTime", -1), ("createdAt", -1)],
-    )
-
-    if not launch and not any([station_id, date, time_value]):
+        query = _build_launch_query(
+            user_id,
+            station_id=station_id or None,
+            date=date or None,
+            time_value=time_value or None,
+        )
         launch = db["launches"].find_one(
-            {"userId": user_id},
+            query,
             sort=[("launchDate", -1), ("launchTime", -1), ("createdAt", -1)],
         )
 
-    if not launch:
+        if not launch and not any([station_id, date, time_value]):
+            launch = db["launches"].find_one(
+                {"userId": user_id},
+                sort=[("launchDate", -1), ("launchTime", -1), ("createdAt", -1)],
+            )
+
+        if not launch:
+            return jsonify(
+                {
+                    "success": True,
+                    "profile": [],
+                    "parameters": _calculate_parameters([]),
+                    "axisLimits": None,
+                    "metadata": {
+                        "stationId": station_id or None,
+                        "date": date or None,
+                        "time": time_value or None,
+                        "source": "none",
+                        "recordType": "launch-telemetry",
+                    },
+                    "launch": None,
+                    "availableLaunches": launch_options,
+                    "message": "No launch found for the selected station, date, and sounding time.",
+                }
+            )
+
+        profile, source_collection = _load_launch_profile(db, launch)
+        parameters = _calculate_parameters(profile)
+        message = None
+        if not profile:
+            message = "This launch has no stored telemetry yet."
+
         return jsonify(
             {
                 "success": True,
-                "profile": [],
-                "parameters": _calculate_parameters([]),
-                "axisLimits": None,
+                "profile": profile,
+                "parameters": parameters,
+                "axisLimits": _axis_limits(profile),
                 "metadata": {
-                    "stationId": station_id or None,
-                    "date": date or None,
-                    "time": time_value or None,
-                    "source": "none",
+                    "id": str(launch["_id"]),
+                    "stationId": launch.get("station"),
+                    "date": launch.get("launchDate"),
+                    "time": _launch_time_value(launch.get("launchTime")),
+                    "source": source_collection,
                     "recordType": "launch-telemetry",
+                    "telemetryCount": len(profile),
+                    "sondeNumber": launch.get("sondeNumber") or launch.get("radiosondeId"),
                 },
-                "launch": None,
+                "launch": _serialize_launch_option(launch),
                 "availableLaunches": launch_options,
-                "message": "No launch found for the selected station, date, and sounding time.",
+                "message": message,
             }
         )
-
-    profile, source_collection = _load_launch_profile(db, launch)
-    parameters = _calculate_parameters(profile)
-
-    return jsonify(
-        {
-            "success": True,
-            "profile": profile,
-            "parameters": parameters,
-            "axisLimits": _axis_limits(profile),
-            "metadata": {
-                "id": str(launch["_id"]),
-                "stationId": launch.get("station"),
-                "date": launch.get("launchDate"),
-                "time": _launch_time_value(launch.get("launchTime")),
-                "source": source_collection,
-                "recordType": "launch-telemetry",
-                "telemetryCount": len(profile),
-                "sondeNumber": launch.get("sondeNumber") or launch.get("radiosondeId"),
-            },
-            "launch": _serialize_launch_option(launch),
-            "availableLaunches": launch_options,
-        }
-    )
+    except Exception as exc:
+        return jsonify({"success": False, "error": "Failed to load dashboard sounding.", "detail": str(exc)}), 500

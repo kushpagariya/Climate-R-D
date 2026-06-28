@@ -21,6 +21,7 @@ export function ChartZoomWrapper({ data, compareData, children, label, badge }: 
   const [zoomIdx, setZoomIdx] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hasData = data.length > 0;
 
   const factor = ZOOM_LEVELS[zoomIdx];
   const sliceCount = Math.ceil(data.length / factor);
@@ -117,7 +118,16 @@ export function ChartZoomWrapper({ data, compareData, children, label, badge }: 
         </div>
       </div>
 
-      {children(slicedData, slicedCompare, ZOOM_LEVELS[zoomIdx])}
+      {hasData ? (
+        children(slicedData, slicedCompare, ZOOM_LEVELS[zoomIdx])
+      ) : (
+        <div className="flex h-[320px] flex-col items-center justify-center gap-2 rounded-lg border border-border/50 bg-secondary/20 text-center">
+          <div className="text-sm text-slate-300">No telemetry data</div>
+          <div className="max-w-sm text-xs text-slate-500">
+            Select a launch with stored telemetry to render this graph.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
