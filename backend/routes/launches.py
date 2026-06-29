@@ -38,6 +38,7 @@ CSV_ALIASES = {
 }
 
 LAUNCH_STATUSES = {"draft", "ready", "live", "completed", "cancelled"}
+SURFACE_DATA_SOURCES = {"upload", "manual", "upload_with_manual_override"}
 DEFAULT_TELEMETRY_LIMIT = 100
 MAX_TELEMETRY_LIMIT = 500
 
@@ -195,6 +196,11 @@ def _validate_launch_payload(data):
     surface_data = data.get("surfaceData") or {}
     if not isinstance(surface_data, dict):
         raise ValueError("surfaceData must be a JSON object.")
+    surface_source = surface_data.get("source")
+    if surface_source in (None, ""):
+        surface_source = None
+    elif not isinstance(surface_source, str) or surface_source not in SURFACE_DATA_SOURCES:
+        raise ValueError("surfaceData.source is not supported.")
 
     surface = {
         "temperature": _as_number(surface_data, "temperature"),
@@ -207,6 +213,8 @@ def _validate_launch_payload(data):
         "longitude": _as_number(surface_data, "longitude"),
         "altitude": _as_number(surface_data, "altitude"),
     }
+    if surface_source:
+        surface["source"] = surface_source
 
     return launch, surface
 
@@ -239,6 +247,7 @@ def _serialize_launch(doc, surface=None):
             "latitude": surface.get("latitude"),
             "longitude": surface.get("longitude"),
             "altitude": surface.get("altitude"),
+            "source": surface.get("source"),
         }
     return payload
 
@@ -345,6 +354,22 @@ def _surface_from_csv_row(launch_id, row):
         "latitude": _as_number(row, "latitude"),
         "longitude": _as_number(row, "longitude"),
         "altitude": _as_number(row, "altitude_m"),
+        "source": "upload",
+    }
+
+
+def _serialize_surface_data(surface):
+    return {
+        "temperature": surface.get("temperature"),
+        "pressure": surface.get("pressure"),
+        "humidity": surface.get("humidity"),
+        "dewPoint": surface.get("dewPoint"),
+        "windSpeed": surface.get("windSpeed"),
+        "windDirection": surface.get("windDirection"),
+        "latitude": surface.get("latitude"),
+        "longitude": surface.get("longitude"),
+        "altitude": surface.get("altitude"),
+        "source": surface.get("source"),
     }
 
 
@@ -443,11 +468,18 @@ def upload_launch_csv(launch_id):
     g.db["live_telemetry"].insert_many(telemetry_docs)
     g.db["telemetry"].delete_many({"launchId": launch["_id"], "source": {"$in": ["csv", "txt", "dat"]}})
     g.db["telemetry"].insert_many([dict(doc) for doc in telemetry_docs])
-    g.db["initial_surface_data"].update_one(
-        {"launchId": launch["_id"]},
-        {"$set": {**surface_doc, "updatedAt": now}, "$setOnInsert": {"createdAt": now}},
-        upsert=True,
-    )
+    existing_surface = g.db["initial_surface_data"].find_one({"launchId": launch["_id"]})
+    surface_source = (existing_surface or {}).get("source")
+    should_update_surface = surface_source in (None, "upload")
+    if should_update_surface:
+        g.db["initial_surface_data"].update_one(
+            {"launchId": launch["_id"]},
+            {"$set": {**surface_doc, "updatedAt": now}, "$setOnInsert": {"createdAt": now}},
+            upsert=True,
+        )
+        response_surface = surface_doc
+    else:
+        response_surface = existing_surface or surface_doc
     launch_updates = {
         "status": "ready",
         "updatedAt": now,
@@ -469,7 +501,7 @@ def upload_launch_csv(launch_id):
         {
             "success": True,
             "rowCount": len(telemetry_docs),
-            "surfaceData": {key: value for key, value in surface_doc.items() if key != "launchId"},
+            "surfaceData": _serialize_surface_data(response_surface),
             "status": "ready",
         }
     )

@@ -11,6 +11,8 @@ export interface LaunchDetails {
   sourceFileName?: string;
 }
 
+export type SurfaceDataSource = "upload" | "manual" | "upload_with_manual_override";
+
 export interface SurfaceData {
   temperature: number | null;
   pressure: number | null;
@@ -21,6 +23,7 @@ export interface SurfaceData {
   latitude: number | null;
   longitude: number | null;
   altitude: number | null;
+  source?: SurfaceDataSource | null;
 }
 
 export interface LaunchRecord extends LaunchDetails {
@@ -139,7 +142,7 @@ export function getLaunchTelemetryApi(
 export function createLaunchTelemetryApi(
   token: string,
   launchId: string,
-  payload: Partial<SurfaceData> & {
+  payload: Omit<Partial<SurfaceData>, "source"> & {
     second?: number;
     timestamp?: string;
     latitude?: number | null;
@@ -163,7 +166,7 @@ export function createLaunchTelemetryApi(
 
 export function createTelemetryApi(
   token: string,
-  payload: Partial<SurfaceData> & {
+  payload: Omit<Partial<SurfaceData>, "source"> & {
     launchId: string;
     timestamp?: string;
     source?: string;

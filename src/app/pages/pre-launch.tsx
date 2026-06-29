@@ -8,11 +8,19 @@ import {
   FileText,
   Play,
   Radio,
+  RotateCcw,
   Save,
   X,
 } from "lucide-react";
 import { useAuth } from "../auth/use-auth";
-import { createLaunchApi, startLaunchApi, uploadLaunchCsvApi, type LaunchRecord, type SurfaceData } from "../api/launches";
+import {
+  createLaunchApi,
+  startLaunchApi,
+  uploadLaunchCsvApi,
+  type LaunchRecord,
+  type SurfaceData,
+  type SurfaceDataSource,
+} from "../api/launches";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -28,9 +36,9 @@ type LaunchForm = {
   operator: string;
 };
 
-type SurfaceForm = Record<keyof SurfaceData, string>;
+type SurfaceFieldName = Exclude<keyof SurfaceData, "source">;
 
-const emptySurfaceForm: SurfaceForm = {
+const emptySurfaceForm: Record<SurfaceFieldName, string> = {
   temperature: "",
   pressure: "",
   humidity: "",
@@ -50,7 +58,7 @@ function nowTime() {
   return new Date().toTimeString().slice(0, 5);
 }
 
-function toSurfacePayload(surface: SurfaceForm): SurfaceData {
+function toSurfacePayload(surface: Record<SurfaceFieldName, string>, source: SurfaceDataSource): SurfaceData {
   const parseField = (value: string) => (value.trim() === "" ? null : Number(value));
 
   return {
@@ -63,10 +71,11 @@ function toSurfacePayload(surface: SurfaceForm): SurfaceData {
     latitude: parseField(surface.latitude),
     longitude: parseField(surface.longitude),
     altitude: parseField(surface.altitude),
+    source,
   };
 }
 
-function fromSurfacePayload(surface: SurfaceData): SurfaceForm {
+function fromSurfacePayload(surface: SurfaceData): Record<SurfaceFieldName, string> {
   return {
     temperature: surface.temperature?.toString() ?? "",
     pressure: surface.pressure?.toString() ?? "",
@@ -78,6 +87,14 @@ function fromSurfacePayload(surface: SurfaceData): SurfaceForm {
     longitude: surface.longitude?.toString() ?? "",
     altitude: surface.altitude?.toString() ?? "",
   };
+}
+
+function surfaceFormsEqual(
+  current: Record<SurfaceFieldName, string>,
+  uploaded: Record<SurfaceFieldName, string> | null,
+) {
+  if (!uploaded) return false;
+  return (Object.keys(emptySurfaceForm) as SurfaceFieldName[]).every((key) => current[key] === uploaded[key]);
 }
 
 function Field({
@@ -121,18 +138,6 @@ function MetadataItem({ label, value }: { label: string; value?: string | null }
   );
 }
 
-function SurfaceMetric({ label, value, unit }: { label: string; value: string; unit?: string }) {
-  return (
-    <div className="rounded-lg border border-border/60 bg-slate-950/30 p-3">
-      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg text-cyan-100">
-        {value || "-"}
-        {value && unit ? <span className="ml-1 text-xs text-muted-foreground">{unit}</span> : null}
-      </div>
-    </div>
-  );
-}
-
 export function PreLaunchPage() {
   const navigate = useNavigate();
   const { session, setHasSeenPreLaunch } = useAuth();
@@ -145,7 +150,8 @@ export function PreLaunchPage() {
     radiosondeId: "",
     operator: "",
   });
-  const [surfaceForm, setSurfaceForm] = useState<SurfaceForm>(emptySurfaceForm);
+  const [surfaceForm, setSurfaceForm] = useState<Record<SurfaceFieldName, string>>(emptySurfaceForm);
+  const [uploadedSurfaceForm, setUploadedSurfaceForm] = useState<Record<SurfaceFieldName, string> | null>(null);
   const [csvResult, setCsvResult] = useState<CsvParseResult | null>(null);
   const [csvFileName, setCsvFileName] = useState<string | null>(null);
   const [savedLaunch, setSavedLaunch] = useState<LaunchRecord | null>(null);
@@ -157,16 +163,20 @@ export function PreLaunchPage() {
   const isLaunchComplete = useMemo(
     () =>
       Boolean(
-        csvResult &&
-          launchForm.station.trim() &&
+        launchForm.station.trim() &&
           launchForm.launchDate &&
           launchForm.launchTime &&
           launchForm.radiosondeId.trim(),
       ),
-    [csvResult, launchForm],
+    [launchForm],
   );
 
   const workflowStatus = savedLaunch?.status ?? (csvResult ? "ready" : "draft");
+  const surfaceSource: SurfaceDataSource = uploadedSurfaceForm
+    ? surfaceFormsEqual(surfaceForm, uploadedSurfaceForm)
+      ? "upload"
+      : "upload_with_manual_override"
+    : "manual";
 
   const handleLaunchChange = (event: ChangeEvent<HTMLInputElement>) => {
     setLaunchForm((current) => ({ ...current, [event.target.name]: event.target.value }));
@@ -178,9 +188,11 @@ export function PreLaunchPage() {
 
   const applyParsedResult = (result: CsvParseResult, file: string) => {
     const detectedSonde = result.metadata.sondeNumber?.trim();
+    const parsedSurface = fromSurfacePayload(result.surfaceData);
     setCsvResult(result);
     setCsvFileName(file);
-    setSurfaceForm(fromSurfacePayload(result.surfaceData));
+    setSurfaceForm(parsedSurface);
+    setUploadedSurfaceForm(parsedSurface);
     setLaunchForm((current) => ({
       ...current,
       station: result.metadata.station || current.station,
@@ -194,9 +206,15 @@ export function PreLaunchPage() {
     setStatusMessage("Sounding file validated. Review metadata and surface observations before creating the launch.");
   };
 
+  const handleResetSurface = () => {
+    if (!uploadedSurfaceForm) return;
+    setSurfaceForm(uploadedSurfaceForm);
+    setSavedLaunch(null);
+    setStatusMessage("Surface observations reset to uploaded values.");
+  };
+
   const ensureLaunchSaved = async () => {
     if (!session?.token) throw new Error("Sign in again to save this launch.");
-    if (!csvResult) throw new Error("Upload and validate a sounding file before creating a launch.");
     if (!isLaunchComplete) {
       throw new Error("Station, launch date, launch time, and sonde number are required.");
     }
@@ -210,7 +228,7 @@ export function PreLaunchPage() {
       operator: launchForm.operator.trim() || undefined,
       sondeNumber: launchForm.radiosondeId.trim(),
       sourceFileName: csvFileName || undefined,
-      surfaceData: toSurfacePayload(surfaceForm),
+      surfaceData: toSurfacePayload(surfaceForm, surfaceSource),
       status: "ready",
     });
 
@@ -235,6 +253,8 @@ export function PreLaunchPage() {
           current ? { ...current, status: upload.status, surfaceData: upload.surfaceData } : current,
         );
         setStatusMessage(`Launch created and ${upload.rowCount} telemetry rows were staged for live tracking.`);
+      } else {
+        setStatusMessage("Launch created with manually entered surface observations.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create launch.");
@@ -357,28 +377,43 @@ export function PreLaunchPage() {
 
           <aside className="space-y-6">
             <section className="rounded-lg border border-border/60 bg-card/35 p-5">
-              <div className="mb-5 flex items-center gap-3">
-                <ClipboardCheck className="h-5 w-5 text-cyan-300" />
-                <div>
-                  <h2 className="text-lg font-medium">3. Preview Surface Observations</h2>
-                  <p className="text-sm text-muted-foreground">Filled from the first valid profile row.</p>
+              <div className="mb-5 flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <ClipboardCheck className="h-5 w-5 text-cyan-300" />
+                  <div>
+                    <h2 className="text-lg font-medium">3. Surface Observations</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Auto-filled from uploaded data. You can review and edit these values before creating the launch.
+                    </p>
+                  </div>
                 </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-2"
+                  onClick={handleResetSurface}
+                  disabled={!uploadedSurfaceForm || isSaving || isStarting}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Reset to Uploaded Values
+                </Button>
+              </div>
+              <div className="mb-4 flex items-center gap-2">
+                <Badge variant="outline" className="capitalize">
+                  Source: {surfaceSource.replaceAll("_", " ")}
+                </Badge>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <SurfaceMetric label="Pressure" value={surfaceForm.pressure} unit="hPa" />
-                <SurfaceMetric label="Temperature" value={surfaceForm.temperature} unit="C" />
-                <SurfaceMetric label="Humidity" value={surfaceForm.humidity} unit="%" />
-                <SurfaceMetric label="Dew Point" value={surfaceForm.dewPoint} unit="C" />
-                <SurfaceMetric label="Wind Speed" value={surfaceForm.windSpeed} unit="m/s" />
-                <SurfaceMetric label="Wind Direction" value={surfaceForm.windDirection} unit="deg" />
-                <SurfaceMetric label="Latitude" value={surfaceForm.latitude} />
-                <SurfaceMetric label="Longitude" value={surfaceForm.longitude} />
-                <SurfaceMetric label="Ground Altitude" value={surfaceForm.altitude} unit="m" />
-              </div>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <Field label="Surface Pressure" name="pressure" type="number" value={surfaceForm.pressure} onChange={handleSurfaceChange} optional />
-                <Field label="Surface Temperature" name="temperature" type="number" value={surfaceForm.temperature} onChange={handleSurfaceChange} optional />
+                <Field label="Pressure" name="pressure" type="number" value={surfaceForm.pressure} onChange={handleSurfaceChange} optional />
+                <Field label="Temperature" name="temperature" type="number" value={surfaceForm.temperature} onChange={handleSurfaceChange} optional />
+                <Field label="Humidity" name="humidity" type="number" value={surfaceForm.humidity} onChange={handleSurfaceChange} optional />
+                <Field label="Dew Point" name="dewPoint" type="number" value={surfaceForm.dewPoint} onChange={handleSurfaceChange} optional />
+                <Field label="Wind Speed" name="windSpeed" type="number" value={surfaceForm.windSpeed} onChange={handleSurfaceChange} optional />
+                <Field label="Wind Direction" name="windDirection" type="number" value={surfaceForm.windDirection} onChange={handleSurfaceChange} optional />
+                <Field label="Latitude" name="latitude" type="number" value={surfaceForm.latitude} onChange={handleSurfaceChange} optional />
+                <Field label="Longitude" name="longitude" type="number" value={surfaceForm.longitude} onChange={handleSurfaceChange} optional />
+                <Field label="Ground Altitude" name="altitude" type="number" value={surfaceForm.altitude} onChange={handleSurfaceChange} optional />
               </div>
             </section>
 
