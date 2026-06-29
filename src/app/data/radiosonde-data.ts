@@ -133,6 +133,21 @@ export function generateBalloonHistory(stationId: string, count = 14): BalloonRe
 }
 
 export function calculateAtmosphericParameters(data: RadiosondeObservation[]) {
+  if (data.length === 0) {
+    return {
+      freezingLevel: 0,
+      lcl: 0,
+      tropopause: 0,
+      surfaceTemperature: 0,
+      surfacePressure: 0,
+      surfaceHumidity: 0,
+      maxWindSpeed: 0,
+      maxWindHeight: 0,
+      maxAltitude: 0,
+      cape: 0,
+    };
+  }
+
   const freezingLevel = data.find(obs => obs.temperature <= 0)?.height || 0;
 
   const lcl = data.reduce((acc, obs) => {

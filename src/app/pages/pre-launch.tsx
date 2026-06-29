@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Database,
+  FileText,
   Play,
   Radio,
   Save,
@@ -111,6 +112,27 @@ function Field({
   );
 }
 
+function MetadataItem({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-slate-950/30 p-3">
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="mt-1 min-h-5 text-sm text-foreground">{value || "Not detected"}</div>
+    </div>
+  );
+}
+
+function SurfaceMetric({ label, value, unit }: { label: string; value: string; unit?: string }) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-slate-950/30 p-3">
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="mt-1 text-lg text-cyan-100">
+        {value || "-"}
+        {value && unit ? <span className="ml-1 text-xs text-muted-foreground">{unit}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 export function PreLaunchPage() {
   const navigate = useNavigate();
   const { session, setHasSeenPreLaunch } = useAuth();
@@ -135,13 +157,13 @@ export function PreLaunchPage() {
   const isLaunchComplete = useMemo(
     () =>
       Boolean(
-        launchForm.station.trim() &&
+        csvResult &&
+          launchForm.station.trim() &&
           launchForm.launchDate &&
           launchForm.launchTime &&
-          launchForm.balloonId.trim() &&
           launchForm.radiosondeId.trim(),
       ),
-    [launchForm],
+    [csvResult, launchForm],
   );
 
   const workflowStatus = savedLaunch?.status ?? (csvResult ? "ready" : "draft");
@@ -154,19 +176,42 @@ export function PreLaunchPage() {
     setSurfaceForm((current) => ({ ...current, [event.target.name]: event.target.value }));
   };
 
+  const applyParsedResult = (result: CsvParseResult, file: string) => {
+    const detectedSonde = result.metadata.sondeNumber?.trim();
+    setCsvResult(result);
+    setCsvFileName(file);
+    setSurfaceForm(fromSurfacePayload(result.surfaceData));
+    setLaunchForm((current) => ({
+      ...current,
+      station: result.metadata.station || current.station,
+      launchDate: result.metadata.launchDate || current.launchDate || todayDate(),
+      launchTime: result.metadata.launchTime || current.launchTime || nowTime(),
+      balloonId: detectedSonde || current.balloonId,
+      radiosondeId: detectedSonde || current.radiosondeId,
+    }));
+    setSavedLaunch(null);
+    setError(null);
+    setStatusMessage("Sounding file validated. Review metadata and surface observations before creating the launch.");
+  };
+
   const ensureLaunchSaved = async () => {
     if (!session?.token) throw new Error("Sign in again to save this launch.");
+    if (!csvResult) throw new Error("Upload and validate a sounding file before creating a launch.");
     if (!isLaunchComplete) {
-      throw new Error("Station, date, time, balloon ID, and radiosonde ID are required.");
+      throw new Error("Station, launch date, launch time, and sonde number are required.");
     }
 
     if (savedLaunch) return savedLaunch;
 
     const response = await createLaunchApi(session.token, {
       ...launchForm,
+      balloonId: launchForm.balloonId.trim() || launchForm.radiosondeId.trim(),
+      radiosondeId: launchForm.radiosondeId.trim(),
       operator: launchForm.operator.trim() || undefined,
+      sondeNumber: launchForm.radiosondeId.trim(),
+      sourceFileName: csvFileName || undefined,
       surfaceData: toSurfacePayload(surfaceForm),
-      status: csvResult ? "ready" : "draft",
+      status: "ready",
     });
 
     setSavedLaunch(response.launch);
@@ -181,17 +226,18 @@ export function PreLaunchPage() {
     try {
       const launch = await ensureLaunchSaved();
       if (csvResult && session?.token) {
-        const upload = await uploadLaunchCsvApi(session.token, launch.id, csvResult.rows);
+        const upload = await uploadLaunchCsvApi(session.token, launch.id, csvResult.rows, {
+          metadata: csvResult.metadata,
+          fileName: csvFileName || undefined,
+        });
         setSurfaceForm(fromSurfacePayload(upload.surfaceData));
         setSavedLaunch((current) =>
           current ? { ...current, status: upload.status, surfaceData: upload.surfaceData } : current,
         );
-        setStatusMessage(`Launch saved and ${upload.rowCount} CSV rows were staged for live tracking.`);
-      } else {
-        setStatusMessage("Launch saved as a draft.");
+        setStatusMessage(`Launch created and ${upload.rowCount} telemetry rows were staged for live tracking.`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save launch.");
+      setError(err instanceof Error ? err.message : "Unable to create launch.");
     } finally {
       setIsSaving(false);
     }
@@ -205,7 +251,10 @@ export function PreLaunchPage() {
     try {
       const launch = await ensureLaunchSaved();
       if (csvResult && session?.token) {
-        await uploadLaunchCsvApi(session.token, launch.id, csvResult.rows);
+        await uploadLaunchCsvApi(session.token, launch.id, csvResult.rows, {
+          metadata: csvResult.metadata,
+          fileName: csvFileName || undefined,
+        });
       }
       if (!session?.token) throw new Error("Sign in again to start tracking.");
       const response = await startLaunchApi(session.token, launch.id);
@@ -233,13 +282,11 @@ export function PreLaunchPage() {
               <Badge variant={workflowStatus === "live" ? "default" : "outline"} className="capitalize">
                 {workflowStatus}
               </Badge>
-              {csvFileName && (
-                <span className="text-xs text-muted-foreground">CSV: {csvFileName}</span>
-              )}
+              {csvFileName && <span className="text-xs text-muted-foreground">File: {csvFileName}</span>}
             </div>
-            <h1 className="text-3xl font-semibold tracking-tight">Pre-Launch Setup</h1>
+            <h1 className="text-3xl font-semibold tracking-tight">Pre-Launch Sounding Intake</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Configure a radiosonde launch, validate sounding CSV data, and start mission tracking.
+              Upload a sounding file, verify detected metadata and surface observations, then create the launch.
             </p>
           </div>
           <button
@@ -265,46 +312,46 @@ export function PreLaunchPage() {
           </div>
         )}
 
-        <div className="grid gap-6 xl:grid-cols-[1.35fr_0.9fr]">
+        <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-6">
-            <section className="rounded-lg border border-border/60 bg-card/35 p-5">
-              <div className="mb-5 flex items-center gap-3">
-                <Radio className="h-5 w-5 text-cyan-300" />
-                <div>
-                  <h2 className="text-lg font-medium">Launch Details</h2>
-                  <p className="text-sm text-muted-foreground">A balloon launch is the mission record.</p>
-                </div>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Station Name" name="station" value={launchForm.station} onChange={handleLaunchChange} />
-                <Field label="Balloon ID" name="balloonId" value={launchForm.balloonId} onChange={handleLaunchChange} />
-                <Field label="Radiosonde ID" name="radiosondeId" value={launchForm.radiosondeId} onChange={handleLaunchChange} />
-                <Field label="Operator Name" name="operator" value={launchForm.operator} onChange={handleLaunchChange} optional />
-                <Field label="Launch Date" name="launchDate" type="date" value={launchForm.launchDate} onChange={handleLaunchChange} />
-                <Field label="Launch Time" name="launchTime" type="time" value={launchForm.launchTime} onChange={handleLaunchChange} />
-              </div>
-            </section>
-
             <section className="rounded-lg border border-border/60 bg-card/35 p-5">
               <div className="mb-5 flex items-center gap-3">
                 <Database className="h-5 w-5 text-cyan-300" />
                 <div>
-                  <h2 className="text-lg font-medium">Sounding Dataset Upload</h2>
+                  <h2 className="text-lg font-medium">1. Upload Sounding File</h2>
                   <p className="text-sm text-muted-foreground">
-                    Upload a radiosonde dataset (.csv or .txt). The backend will automatically detect the file format, validate the data, and generate atmospheric visualizations.
+                    Supported formats: CSV, TXT, and DAT. Organization Profile Data files are parsed into the platform schema.
                   </p>
                 </div>
               </div>
-              <CsvUploadPanel
-                onParsed={(result, file) => {
-                  setCsvResult(result);
-                  setCsvFileName(file);
-                  setSurfaceForm(fromSurfacePayload(result.surfaceData));
-                  setSavedLaunch(null);
-                  setError(null);
-                  setStatusMessage("CSV validated. Review surface observations before saving.");
-                }}
-              />
+              <CsvUploadPanel onParsed={applyParsedResult} />
+            </section>
+
+            <section className="rounded-lg border border-border/60 bg-card/35 p-5">
+              <div className="mb-5 flex items-center gap-3">
+                <FileText className="h-5 w-5 text-cyan-300" />
+                <div>
+                  <h2 className="text-lg font-medium">2. Preview Metadata</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Detected fields are editable before the launch is created.
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Station" name="station" value={launchForm.station} onChange={handleLaunchChange} />
+                <Field label="Sonde Number" name="radiosondeId" value={launchForm.radiosondeId} onChange={handleLaunchChange} />
+                <Field label="Launch Date" name="launchDate" type="date" value={launchForm.launchDate} onChange={handleLaunchChange} />
+                <Field label="Launch Time" name="launchTime" type="time" value={launchForm.launchTime} onChange={handleLaunchChange} />
+                <Field label="Balloon ID" name="balloonId" value={launchForm.balloonId} onChange={handleLaunchChange} optional />
+                <Field label="Operator" name="operator" value={launchForm.operator} onChange={handleLaunchChange} optional />
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <MetadataItem label="Detected Format" value={csvResult?.metadata.sourceFormat?.toUpperCase()} />
+                <MetadataItem label="Detected Date" value={csvResult?.metadata.launchDate} />
+                <MetadataItem label="Detected Time" value={csvResult?.metadata.launchTime} />
+                <MetadataItem label="Detected Sonde" value={csvResult?.metadata.sondeNumber} />
+              </div>
             </section>
           </div>
 
@@ -313,42 +360,52 @@ export function PreLaunchPage() {
               <div className="mb-5 flex items-center gap-3">
                 <ClipboardCheck className="h-5 w-5 text-cyan-300" />
                 <div>
-                  <h2 className="text-lg font-medium">Surface Observations</h2>
-                  <p className="text-sm text-muted-foreground">Auto-filled from CSV row 1 and editable.</p>
+                  <h2 className="text-lg font-medium">3. Preview Surface Observations</h2>
+                  <p className="text-sm text-muted-foreground">Filled from the first valid profile row.</p>
                 </div>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Temperature (C)" name="temperature" type="number" value={surfaceForm.temperature} onChange={handleSurfaceChange} />
-                <Field label="Pressure (hPa)" name="pressure" type="number" value={surfaceForm.pressure} onChange={handleSurfaceChange} />
-                <Field label="Relative Humidity (%)" name="humidity" type="number" value={surfaceForm.humidity} onChange={handleSurfaceChange} />
-                <Field label="Dew Point (C)" name="dewPoint" type="number" value={surfaceForm.dewPoint} onChange={handleSurfaceChange} />
-                <Field label="Wind Speed (m/s)" name="windSpeed" type="number" value={surfaceForm.windSpeed} onChange={handleSurfaceChange} />
-                <Field label="Wind Direction (deg)" name="windDirection" type="number" value={surfaceForm.windDirection} onChange={handleSurfaceChange} />
-                <Field label="Latitude" name="latitude" type="number" value={surfaceForm.latitude} onChange={handleSurfaceChange} />
-                <Field label="Longitude" name="longitude" type="number" value={surfaceForm.longitude} onChange={handleSurfaceChange} />
-                <Field label="Altitude (m)" name="altitude" type="number" value={surfaceForm.altitude} onChange={handleSurfaceChange} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <SurfaceMetric label="Pressure" value={surfaceForm.pressure} unit="hPa" />
+                <SurfaceMetric label="Temperature" value={surfaceForm.temperature} unit="C" />
+                <SurfaceMetric label="Humidity" value={surfaceForm.humidity} unit="%" />
+                <SurfaceMetric label="Dew Point" value={surfaceForm.dewPoint} unit="C" />
+                <SurfaceMetric label="Wind Speed" value={surfaceForm.windSpeed} unit="m/s" />
+                <SurfaceMetric label="Wind Direction" value={surfaceForm.windDirection} unit="deg" />
+                <SurfaceMetric label="Latitude" value={surfaceForm.latitude} />
+                <SurfaceMetric label="Longitude" value={surfaceForm.longitude} />
+                <SurfaceMetric label="Ground Altitude" value={surfaceForm.altitude} unit="m" />
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <Field label="Surface Pressure" name="pressure" type="number" value={surfaceForm.pressure} onChange={handleSurfaceChange} optional />
+                <Field label="Surface Temperature" name="temperature" type="number" value={surfaceForm.temperature} onChange={handleSurfaceChange} optional />
               </div>
             </section>
 
             <section className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 p-5">
-              <h2 className="text-lg font-medium">Launch Actions</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Save the launch setup, then start live tracking when the radiosonde is released.
-              </p>
-              <div className="mt-5 grid gap-3">
-                <Button type="button" className="gap-2" onClick={handleSave} disabled={isSaving || isStarting}>
+              <div className="mb-4 flex items-center gap-3">
+                <Radio className="h-5 w-5 text-cyan-300" />
+                <div>
+                  <h2 className="text-lg font-medium">4. Create Launch</h2>
+                  <p className="text-sm text-muted-foreground">
+                    The current route and collection contracts stay compatible.
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-3">
+                <Button type="button" className="gap-2" onClick={handleSave} disabled={isSaving || isStarting || !isLaunchComplete}>
                   <Save className="h-4 w-4" />
-                  {isSaving ? "Saving..." : "Save Launch"}
+                  {isSaving ? "Creating..." : "Create Launch"}
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
                   className="gap-2"
                   onClick={handleStart}
-                  disabled={isSaving || isStarting}
+                  disabled={isSaving || isStarting || !isLaunchComplete}
                 >
                   <Play className="h-4 w-4" />
-                  {isStarting ? "Starting..." : "Start Live Tracking"}
+                  {isStarting ? "Starting..." : "Create and Start Tracking"}
                 </Button>
                 <Button type="button" variant="ghost" onClick={handleSkip} disabled={isSaving || isStarting}>
                   Skip to Dashboard

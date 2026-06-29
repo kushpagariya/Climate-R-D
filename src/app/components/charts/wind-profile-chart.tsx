@@ -63,6 +63,9 @@ export function WindProfileChart({
             20000,
             24000,
             28000,
+            32000,
+            36000,
+            36241,
           ]}
           stroke="#94a3b8"
           tick={{ fill: '#94a3b8', fontSize: 10 }}

@@ -2,7 +2,7 @@ import { useRef, useState, type DragEvent } from "react";
 import { AlertCircle, CheckCircle2, FileUp, Upload } from "lucide-react";
 import { Button } from "../ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
-import { parseSoundingCsv, REQUIRED_CSV_COLUMNS, type CsvParseResult } from "./csv-utils";
+import { parseSoundingFile, REQUIRED_CSV_COLUMNS, type CsvParseResult } from "./csv-utils";
 
 interface Props {
   onParsed: (result: CsvParseResult, fileName: string) => void;
@@ -21,21 +21,23 @@ export function CsvUploadPanel({ onParsed }: Props) {
     setMessage(null);
     setError(null);
 
-    if (!file.name.toLowerCase().endsWith(".csv") && !file.name.toLowerCase().endsWith(".txt")) {
+    const lowerName = file.name.toLowerCase();
+    if (!lowerName.endsWith(".csv") && !lowerName.endsWith(".txt") && !lowerName.endsWith(".dat")) {
       setPreview(null);
-      setError("Upload a CSV or TXT file.");
+      setError("Upload a CSV, TXT, or DAT file.");
       return;
     }
 
     try {
       const text = await file.text();
-      const result = parseSoundingCsv(text);
+      const result = parseSoundingFile(text, file.name);
       setPreview(result);
-      setMessage(`Validated ${result.rows.length} rows. Surface observations were filled from row 1.`);
+      const format = result.metadata.sourceFormat?.toUpperCase() ?? "SOUNDING";
+      setMessage(`Validated ${result.rows.length} ${format} rows. Surface observations were filled from row 1.`);
       onParsed(result, file.name);
     } catch (err) {
       setPreview(null);
-      setError(err instanceof Error ? err.message : "Unable to parse CSV.");
+      setError(err instanceof Error ? err.message : "Unable to parse sounding file.");
     }
   };
 
@@ -66,7 +68,7 @@ export function CsvUploadPanel({ onParsed }: Props) {
         </div>
         <div className="text-sm font-medium">Drop sounding dataset here</div>
         <div className="mt-1 text-xs text-muted-foreground">
-          Required columns are validated before upload.
+          CSV, TXT, and DAT files are normalized before upload.
         </div>
         <Button
           type="button"
@@ -80,7 +82,7 @@ export function CsvUploadPanel({ onParsed }: Props) {
         <input
           ref={inputRef}
           type="file"
-          accept=".csv,.txt,text/csv,text/plain"
+          accept=".csv,.txt,.dat,text/csv,text/plain"
           className="hidden"
           onChange={(event) => {
             const file = event.target.files?.[0];
@@ -90,7 +92,7 @@ export function CsvUploadPanel({ onParsed }: Props) {
       </div>
 
       <div className="rounded-lg border border-border/60 bg-card/30 p-3">
-        <div className="text-xs uppercase tracking-widest text-muted-foreground">Required Columns</div>
+        <div className="text-xs uppercase tracking-widest text-muted-foreground">Canonical Columns</div>
         <div className="mt-2 flex flex-wrap gap-2">
           {REQUIRED_CSV_COLUMNS.map((column) => (
             <span
