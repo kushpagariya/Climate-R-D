@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Activity, Gauge, RadioTower, Thermometer, Waves, Wind } from "lucide-react";
+import { LiveFlightMap } from "../components/live-flight-map";
 import {
   CartesianGrid,
   Line,
@@ -267,6 +268,15 @@ export function LiveTrackingPage() {
               </div>
             );
           })}
+        </div>
+
+        <div className="w-full">
+          <LiveFlightMap 
+            stationName={launch?.station || "Launch Site"}
+            stationLat={launch?.surfaceData?.latitude}
+            stationLon={launch?.surfaceData?.longitude}
+            telemetry={telemetry}
+          />
         </div>
 
         <div className="grid gap-6 xl:grid-cols-2">

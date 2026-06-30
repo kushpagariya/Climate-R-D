@@ -50,7 +50,7 @@ export function AuthShell({ children, eyebrow, title, description, footer }: Aut
             <div className="mt-10 hidden max-w-xl grid-cols-3 gap-3 lg:grid">
               {[
                 ["700 hPa", "Profile Layer"],
-                ["12 UTC", "Sounding Cycle"],
+                ["00 UTC", "Standard Sounding"],
                 ["WMO", "Station Ready"],
               ].map(([value, label]) => (
                 <div
